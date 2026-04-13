@@ -249,7 +249,7 @@ def _send_media_via_adapter(adapter, chat_id: str, media_files: list, metadata: 
             logger.warning("Job '%s': failed to send media %s: %s", job.get("id", "?"), media_path, e)
 
 
-def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Optional[str]:
+def _deliver_result(job: dict, content: str, adapters=None, loop=None, elapsed_seconds: float = None, model_label: str = None) -> Optional[str]:
     """
     Deliver job output to the configured target(s) (origin chat, specific platform, etc.).
 
@@ -304,9 +304,13 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
     if wrap_response:
         task_name = job.get("name", job["id"])
         job_id = job.get("id", "")
+        meta = f"Model: {model_label}" if model_label else f"Provider: {job.get('provider', 'n/a')} | Model: {job.get('model', 'n/a')}"
+        if elapsed_seconds is not None:
+            meta += f" | Compiled in: {elapsed_seconds:.1f}s"
         delivery_content = (
             f"Cronjob Response: {task_name}\n"
             f"(job_id: {job_id})\n"
+            f"{meta}\n"
             f"-------------\n\n"
             f"{content}\n\n"
             f"To stop or manage this job, send me a new message (e.g. \"stop reminder {task_name}\")."
@@ -646,8 +650,9 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
     Execute a single cron job.
     
     Returns:
-        Tuple of (success, full_output_doc, final_response, error_message)
+        Tuple of (success, full_output_doc, final_response, error_message, elapsed_seconds, model_label)
     """
+    import time as _time
     from run_agent import AIAgent
     
     # Initialize SQLite session store so cron job messages are persisted
@@ -835,6 +840,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
         #
         # Uses the agent's built-in activity tracker (updated by
         # _touch_activity() on every tool call, API call, and stream delta).
+        _start_time = _time.monotonic()
         _cron_timeout = float(os.getenv("HERMES_CRON_TIMEOUT", 600))
         _cron_inactivity_limit = _cron_timeout if _cron_timeout > 0 else None
         _POLL_INTERVAL = 5.0
@@ -927,8 +933,10 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
 {logged_response}
 """
         
-        logger.info("Job '%s' completed successfully", job_name)
-        return True, output, final_response, None
+        _elapsed = _time.monotonic() - _start_time
+        _model_label = f"{turn_route['runtime'].get('provider', '')}/{turn_route['model']}"
+        logger.info("Job '%s' completed successfully in %.1fs", job_name, _elapsed)
+        return True, output, final_response, None, _elapsed, _model_label
         
     except Exception as e:
         error_msg = f"{type(e).__name__}: {str(e)}"
@@ -950,7 +958,8 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
 {error_msg}
 ```
 """
-        return False, output, "", error_msg
+        _elapsed = _time.monotonic() - _start_time if '_start_time' in dir() else 0
+        return False, output, "", error_msg, _elapsed, ""
 
     finally:
         # Clean up injected env vars so they don't leak to other jobs
@@ -1024,7 +1033,7 @@ def tick(verbose: bool = True, adapters=None, loop=None) -> int:
                 # One-shot jobs are left alone so they can retry on restart.
                 advance_next_run(job["id"])
 
-                success, output, final_response, error = run_job(job)
+                success, output, final_response, error, _elapsed, _model_label = run_job(job)
 
                 output_file = save_job_output(job["id"], output)
                 if verbose:
@@ -1042,7 +1051,7 @@ def tick(verbose: bool = True, adapters=None, loop=None) -> int:
                 delivery_error = None
                 if should_deliver:
                     try:
-                        delivery_error = _deliver_result(job, deliver_content, adapters=adapters, loop=loop)
+                        delivery_error = _deliver_result(job, deliver_content, adapters=adapters, loop=loop, elapsed_seconds=_elapsed, model_label=_model_label)
                     except Exception as de:
                         delivery_error = str(de)
                         logger.error("Delivery failed for job %s: %s", job["id"], de)
