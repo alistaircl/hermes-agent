@@ -691,10 +691,10 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
             if delivery_target.get("thread_id") is not None:
                 os.environ["HERMES_CRON_AUTO_DELIVER_THREAD_ID"] = str(delivery_target["thread_id"])
 
-        # Get model from job config first, then normalize for provider
+        # Normalize model name for provider (e.g., add vendor prefix, handle aliases)
         model = job.get("model") or ""
-        from hermes_cli.model_normalize import normalize_model_for_provider
         if model:
+            from hermes_cli.model_normalize import normalize_model_for_provider
             model = normalize_model_for_provider(model, job.get("provider"))
 
         # Load config.yaml for model, reasoning, prefill, toolsets, provider routing
