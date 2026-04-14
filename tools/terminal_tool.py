@@ -1300,6 +1300,16 @@ def terminal_tool(
                         "description": approval.get("description", "command flagged"),
                         "pattern_key": approval.get("pattern_key", ""),
                     }, ensure_ascii=False)
+                # Tirith hard block — return security warning with retry hint.
+                # Model gets the finding details and can try a safer alternative.
+                if approval.get("status") == "tirith_blocked":
+                    return json.dumps({
+                        "output": "",
+                        "exit_code": -1,
+                        "error": approval.get("message", "Command blocked by security policy."),
+                        "status": "blocked",
+                        "security_hint": True,
+                    }, ensure_ascii=False)
                 # Command was blocked
                 desc = approval.get("description", "command flagged")
                 fallback_msg = (
