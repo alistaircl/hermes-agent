@@ -374,7 +374,8 @@ class TestBlockingApprovalE2E:
             os.environ["HERMES_SESSION_KEY"] = session_key
             try:
                 result_holder[0] = check_all_command_guards(
-                    "rm -rf /important", "local"
+                    "rm -rf /important", "local",
+                    justification="Cleaning up important directory for test"
                 )
             finally:
                 os.environ.pop("HERMES_GATEWAY_SESSION", None)
@@ -422,7 +423,8 @@ class TestBlockingApprovalE2E:
             os.environ["HERMES_SESSION_KEY"] = session_key
             try:
                 result_holder[0] = check_all_command_guards(
-                    "rm -rf /important", "local"
+                    "rm -rf /important", "local",
+                    justification="Cleaning up important directory for test"
                 )
             finally:
                 os.environ.pop("HERMES_GATEWAY_SESSION", None)
@@ -467,7 +469,8 @@ class TestBlockingApprovalE2E:
                 with patch("tools.approval._get_approval_config",
                            return_value={"gateway_timeout": 1}):
                     result_holder[0] = check_all_command_guards(
-                        "rm -rf /important", "local"
+                        "rm -rf /important", "local",
+                        justification="Cleaning up for test"
                     )
             finally:
                 os.environ.pop("HERMES_GATEWAY_SESSION", None)
@@ -506,7 +509,10 @@ class TestBlockingApprovalE2E:
                 os.environ["HERMES_EXEC_ASK"] = "1"
                 os.environ["HERMES_SESSION_KEY"] = session_key
                 try:
-                    results[idx] = check_all_command_guards(cmd, "local")
+                    results[idx] = check_all_command_guards(
+                        cmd, "local",
+                        justification=f"Test justification for {cmd}"
+                    )
                 finally:
                     os.environ.pop("HERMES_GATEWAY_SESSION", None)
                     os.environ.pop("HERMES_EXEC_ASK", None)
@@ -563,7 +569,10 @@ class TestBlockingApprovalE2E:
                 os.environ["HERMES_EXEC_ASK"] = "1"
                 os.environ["HERMES_SESSION_KEY"] = session_key
                 try:
-                    results[idx] = check_all_command_guards(cmd, "local")
+                    results[idx] = check_all_command_guards(
+                        cmd, "local",
+                        justification=f"Test justification for {cmd}"
+                    )
                 finally:
                     os.environ.pop("HERMES_GATEWAY_SESSION", None)
                     os.environ.pop("HERMES_EXEC_ASK", None)

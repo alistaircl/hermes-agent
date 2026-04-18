@@ -2447,6 +2447,7 @@ class DiscordAdapter(BasePlatformAdapter):
         self, chat_id: str, command: str, session_key: str,
         description: str = "dangerous command",
         metadata: Optional[dict] = None,
+        justification: str = "",
     ) -> SendResult:
         """
         Send a button-based exec approval prompt for a dangerous command.
@@ -2476,6 +2477,8 @@ class DiscordAdapter(BasePlatformAdapter):
                 color=discord.Color.orange(),
             )
             embed.add_field(name="Reason", value=description, inline=False)
+            if justification:
+                embed.add_field(name="🤖 Agent's Justification", value=justification[:1024], inline=False)
 
             view = ExecApprovalView(
                 session_key=session_key,

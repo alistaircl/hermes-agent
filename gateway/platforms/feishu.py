@@ -1450,6 +1450,7 @@ class FeishuAdapter(BasePlatformAdapter):
         self, chat_id: str, command: str, session_key: str,
         description: str = "dangerous command",
         metadata: Optional[Dict[str, Any]] = None,
+        justification: str = "",
     ) -> SendResult:
         """Send an interactive card with approval buttons.
 
@@ -1472,6 +1473,10 @@ class FeishuAdapter(BasePlatformAdapter):
                     "value": {"hermes_action": action_name, "approval_id": approval_id},
                 }
 
+            justification_line = ""
+            if justification:
+                justification_line = f"\n\n🤖 **Agent's justification:**\n{justification}"
+
             card = {
                 "config": {"wide_screen_mode": True},
                 "header": {
@@ -1481,7 +1486,7 @@ class FeishuAdapter(BasePlatformAdapter):
                 "elements": [
                     {
                         "tag": "markdown",
-                        "content": f"```\n{cmd_preview}\n```\n**Reason:** {description}",
+                        "content": f"```\n{cmd_preview}\n```\n**Reason:** {description}{justification_line}",
                     },
                     {
                         "tag": "action",

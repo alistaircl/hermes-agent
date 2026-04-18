@@ -1223,6 +1223,7 @@ class SlackAdapter(BasePlatformAdapter):
         self, chat_id: str, command: str, session_key: str,
         description: str = "dangerous command",
         metadata: Optional[Dict[str, Any]] = None,
+        justification: str = "",
     ) -> SendResult:
         """Send a Block Kit approval prompt with interactive buttons.
 
@@ -1236,6 +1237,10 @@ class SlackAdapter(BasePlatformAdapter):
             cmd_preview = command[:2900] + "..." if len(command) > 2900 else command
             thread_ts = self._resolve_thread_ts(None, metadata)
 
+            justification_line = ""
+            if justification:
+                justification_line = f"\n\n🤖 *Agent's justification:*\n{justification}"
+
             blocks = [
                 {
                     "type": "section",
@@ -1245,6 +1250,7 @@ class SlackAdapter(BasePlatformAdapter):
                             f":warning: *Command Approval Required*\n"
                             f"```{cmd_preview}```\n"
                             f"Reason: {description}"
+                            f"{justification_line}"
                         ),
                     },
                 },

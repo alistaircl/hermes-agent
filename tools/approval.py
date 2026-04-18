@@ -9,6 +9,7 @@ This module is the single source of truth for the dangerous command system:
 """
 
 import contextvars
+import hashlib
 import logging
 import os
 import re
@@ -281,6 +282,35 @@ _pending: dict[str, dict] = {}
 _session_approved: dict[str, set] = {}
 _session_yolo: set[str] = set()
 _permanent_approved: set = set()
+
+# Justification state: tracks commands awaiting justification before approval.
+# session_key → {"command": str, "pattern_key": str, "pattern_keys": list,
+#                "description": str, "command_hash": str}
+_pending_approvals: dict[str, dict] = {}
+# session_key → justification text (set by agent, consumed on retry)
+_pending_justifications: dict[str, str] = {}
+
+
+def provide_command_justification(session_key: str, justification: str) -> bool:
+    """Store justification for a pending approval. Returns True if there was
+    a pending approval waiting for justification."""
+    with _lock:
+        if session_key in _pending_approvals:
+            _pending_justifications[session_key] = justification
+            return True
+        return False
+
+
+def _get_pending_justification(session_key: str, cmd_hash: str) -> tuple:
+    """Check if justification exists for this command. Returns (has_justification, justification_text, is_same_command)."""
+    pending = _pending_approvals.get(session_key)
+    if not pending:
+        return (False, None, False)
+    is_same = pending.get("command_hash") == cmd_hash
+    justification = _pending_justifications.get(session_key)
+    if justification and is_same:
+        return (True, justification, True)
+    return (False, justification, False)
 
 # =========================================================================
 # Blocking gateway approval (mirrors CLI's synchronous input() flow)
@@ -788,13 +818,23 @@ def _format_tirith_description(tirith_result: dict) -> str:
 
 
 def check_all_command_guards(command: str, env_type: str,
-                             approval_callback=None) -> dict:
+                             approval_callback=None,
+                             justification: str = None) -> dict:
     """Run all pre-exec security checks and return a single approval decision.
 
     Gathers findings from tirith and dangerous-command detection, then
     presents them as a single combined approval request. This prevents
     a gateway force=True replay from bypassing one check when only the
     other was shown to the user.
+
+    Args:
+        command: The shell command to check.
+        env_type: Terminal backend type ('local', 'ssh', 'docker', etc.).
+        approval_callback: Optional CLI callback for interactive prompts.
+        justification: Agent's justification for why this command is needed.
+            When provided on retry, proceeds directly to user approval with
+            the justification included. When omitted on a flagged command,
+            returns justification_required first.
     """
     # Skip containers for both checks
     if env_type in ("docker", "singularity", "modal", "daytona"):
@@ -899,7 +939,51 @@ def check_all_command_guards(command: str, env_type: str,
         with _lock:
             notify_cb = _gateway_notify_cbs.get(session_key)
 
+        # Effective justification (from param or pending state)
+        cmd_hash = hashlib.sha256(command.encode()).hexdigest()[:16]
+        effective_justification = justification
+        if not effective_justification:
+            with _lock:
+                _, effective_justification, _ = _get_pending_justification(
+                    session_key, cmd_hash)
+
         if notify_cb is not None:
+            # --- Phase 3a: Justification gate (blocking gateway only) ---
+            # Before notifying the user, require the agent to justify why
+            # this command is necessary.  If justification is provided in the
+            # call, proceed directly.  Otherwise, return justification_required.
+            if not effective_justification:
+                # No justification provided — request it from the agent
+                with _lock:
+                    _pending_approvals[session_key] = {
+                        "command": command,
+                        "pattern_key": primary_key,
+                        "pattern_keys": all_keys,
+                        "description": combined_desc,
+                        "command_hash": cmd_hash,
+                    }
+                return {
+                    "approved": False,
+                    "status": "justification_required",
+                    "command": command,
+                    "description": combined_desc,
+                    "pattern_key": primary_key,
+                    "pattern_keys": all_keys,
+                    "message": (
+                        f"⛔ This command needs approval ({combined_desc}).\n\n"
+                        f"**Command:**\n```\n{command}\n```\n\n"
+                        f"Before this can be sent to the user for approval, you MUST provide a justification. "
+                        f"Retry this command with the `justification` parameter explaining:\n"
+                        f"1. Why this command is necessary for the current task\n"
+                        f"2. Why it's safe (if applicable)"
+                    ),
+                }
+
+            # Justification provided — clean up state and proceed to notify user
+            with _lock:
+                _pending_approvals.pop(session_key, None)
+                _pending_justifications.pop(session_key, None)
+
             # --- Blocking gateway approval (queue-based) ---
             # Each call gets its own _ApprovalEntry so parallel subagents
             # and execute_code threads can block concurrently.
@@ -908,6 +992,7 @@ def check_all_command_guards(command: str, env_type: str,
                 "pattern_key": primary_key,
                 "pattern_keys": all_keys,
                 "description": combined_desc,
+                "justification": effective_justification,
             }
             entry = _ApprovalEntry(approval_data)
             with _lock:
