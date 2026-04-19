@@ -284,33 +284,40 @@ _session_yolo: set[str] = set()
 _permanent_approved: set = set()
 
 # Justification state: tracks commands awaiting justification before approval.
-# session_key → {"command": str, "pattern_key": str, "pattern_keys": list,
-#                "description": str, "command_hash": str}
-_pending_approvals: dict[str, dict] = {}
-# session_key → justification text (set by agent, consumed on retry)
-_pending_justifications: dict[str, str] = {}
+# (session_key, cmd_hash) -> {"command": str, "pattern_key": str, "pattern_keys": list,
+#                             "description": str, "command_hash": str, "retries": int}
+_pending_approvals: dict[tuple, dict] = {}
+# (session_key, cmd_hash) -> justification text (set by agent via param, consumed on retry)
+_pending_justifications: dict[tuple, str] = {}
+# Max retries before auto-blocking a command stuck in justification_required loop
+_MAX_JUSTIFICATION_RETRIES = 3
 
 
-def provide_command_justification(session_key: str, justification: str) -> bool:
+def provide_command_justification(
+    session_key: str, cmd_hash: str, justification: str
+) -> bool:
     """Store justification for a pending approval. Returns True if there was
     a pending approval waiting for justification."""
+    key = (session_key, cmd_hash)
     with _lock:
-        if session_key in _pending_approvals:
-            _pending_justifications[session_key] = justification
+        if key in _pending_approvals:
+            _pending_justifications[key] = justification
             return True
         return False
 
 
 def _get_pending_justification(session_key: str, cmd_hash: str) -> tuple:
-    """Check if justification exists for this command. Returns (has_justification, justification_text, is_same_command)."""
-    pending = _pending_approvals.get(session_key)
+    """Check if justification exists for this command.
+    Returns (has_justification, justification_text, is_same_command, retry_count)."""
+    key = (session_key, cmd_hash)
+    pending = _pending_approvals.get(key)
     if not pending:
-        return (False, None, False)
-    is_same = pending.get("command_hash") == cmd_hash
-    justification = _pending_justifications.get(session_key)
-    if justification and is_same:
-        return (True, justification, True)
-    return (False, justification, False)
+        return (False, None, False, 0)
+    retries = pending.get("retries", 0)
+    justification = _pending_justifications.get(key)
+    if justification:
+        return (True, justification, True, retries)
+    return (False, None, False, retries)
 
 # =========================================================================
 # Blocking gateway approval (mirrors CLI's synchronous input() flow)
@@ -358,6 +365,11 @@ def unregister_gateway_notify(session_key: str) -> None:
         entries = _gateway_queues.pop(session_key, [])
         for entry in entries:
             entry.event.set()
+        # Clean up any pending justification state for this session
+        stale_keys = [k for k in _pending_approvals if k[0] == session_key]
+        for k in stale_keys:
+            _pending_approvals.pop(k, None)
+            _pending_justifications.pop(k, None)
 
 
 def resolve_gateway_approval(session_key: str, choice: str,
@@ -646,7 +658,12 @@ def _smart_approve(command: str, description: str) -> str:
     (openai/codex#13860).
     """
     try:
-        from agent.auxiliary_client import call_llm
+        from agent.auxiliary_client import get_text_auxiliary_client, auxiliary_max_tokens_param
+
+        client, model = get_text_auxiliary_client(task="approval")
+        if not client or not model:
+            logger.debug("Smart approvals: no aux client available, escalating")
+            return "escalate"
 
         prompt = f"""You are a security reviewer for an AI coding agent. A terminal command was flagged by pattern matching as potentially dangerous.
 
@@ -662,11 +679,11 @@ Rules:
 
 Respond with exactly one word: APPROVE, DENY, or ESCALATE"""
 
-        response = call_llm(
-            task="approval",
+        response = client.chat.completions.create(
+            model=model,
             messages=[{"role": "user", "content": prompt}],
+            **auxiliary_max_tokens_param(16),
             temperature=0,
-            max_tokens=16,
         )
 
         answer = (response.choices[0].message.content or "").strip().upper()
@@ -936,10 +953,11 @@ def check_all_command_guards(command: str, env_type: str,
 
         # Effective justification (from param or pending state)
         cmd_hash = hashlib.sha256(command.encode()).hexdigest()[:16]
+        pending_key = (session_key, cmd_hash)
         effective_justification = justification
         if not effective_justification:
             with _lock:
-                _, effective_justification, _ = _get_pending_justification(
+                _, effective_justification, _, _ = _get_pending_justification(
                     session_key, cmd_hash)
 
         if notify_cb is not None:
@@ -948,15 +966,40 @@ def check_all_command_guards(command: str, env_type: str,
             # this command is necessary.  If justification is provided in the
             # call, proceed directly.  Otherwise, return justification_required.
             if not effective_justification:
-                # No justification provided — request it from the agent
+                # Check retry count to prevent infinite loops
                 with _lock:
-                    _pending_approvals[session_key] = {
-                        "command": command,
+                    existing = _pending_approvals.get(pending_key)
+                    retries = (existing.get("retries", 0) + 1) if existing else 1
+                    # Atomically: check limit AND store — no TOCTOU between threads
+                    if retries > _MAX_JUSTIFICATION_RETRIES:
+                        _pending_approvals.pop(pending_key, None)
+                        _pending_justifications.pop(pending_key, None)
+                        _blocked = True
+                    else:
+                        _pending_approvals[pending_key] = {
+                            "command": command,
+                            "pattern_key": primary_key,
+                            "pattern_keys": all_keys,
+                            "description": combined_desc,
+                            "command_hash": cmd_hash,
+                            "retries": retries,
+                        }
+                        _blocked = False
+
+                if _blocked:
+                    return {
+                        "approved": False,
+                        "message": (
+                            f"BLOCKED: Command rejected after {_MAX_JUSTIFICATION_RETRIES} "
+                            f"attempts without justification. "
+                            f"You MUST provide a justification using the `justification` parameter "
+                            f"before retrying. Example: terminal(command=\"...\", justification=\"...\")"
+                        ),
                         "pattern_key": primary_key,
-                        "pattern_keys": all_keys,
                         "description": combined_desc,
-                        "command_hash": cmd_hash,
                     }
+
+                # Not blocked — return justification_required with retry count
                 return {
                     "approved": False,
                     "status": "justification_required",
@@ -965,19 +1008,20 @@ def check_all_command_guards(command: str, env_type: str,
                     "pattern_key": primary_key,
                     "pattern_keys": all_keys,
                     "message": (
-                        f"⛔ This command needs approval ({combined_desc}).\n\n"
+                        f"\u26d4 This command needs approval ({combined_desc}).\n\n"
                         f"**Command:**\n```\n{command}\n```\n\n"
                         f"Before this can be sent to the user for approval, you MUST provide a justification. "
                         f"Retry this command with the `justification` parameter explaining:\n"
                         f"1. Why this command is necessary for the current task\n"
-                        f"2. Why it's safe (if applicable)"
+                        f"2. Why it's safe (if applicable)\n\n"
+                        f"(Attempt {retries}/{_MAX_JUSTIFICATION_RETRIES})"
                     ),
                 }
 
             # Justification provided — clean up state and proceed to notify user
             with _lock:
-                _pending_approvals.pop(session_key, None)
-                _pending_justifications.pop(session_key, None)
+                _pending_approvals.pop(pending_key, None)
+                _pending_justifications.pop(pending_key, None)
 
             # --- Blocking gateway approval (queue-based) ---
             # Each call gets its own _ApprovalEntry so parallel subagents
