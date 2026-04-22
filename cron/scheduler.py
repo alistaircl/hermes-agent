@@ -16,6 +16,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 
 # fcntl is Unix-only; on Windows use msvcrt for file locking
 try:
@@ -317,9 +318,22 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
     if wrap_response:
         task_name = job.get("name", job["id"])
         job_id = job.get("id", "")
+        model = job.get("model", "")
+        provider = job.get("provider", "")
+        model_info = f"{provider}/{model}" if provider and model else model or "default"
+        # Include run time if available
+        timing = ""
+        elapsed_s = job.get("_elapsed_seconds")
+        if elapsed_s is not None:
+            if elapsed_s >= 60:
+                m, s = divmod(int(elapsed_s), 60)
+                timing = f" | {m}m {s}s"
+            else:
+                timing = f" | {elapsed_s:.1f}s"
         delivery_content = (
             f"Cronjob Response: {task_name}\n"
             f"(job_id: {job_id})\n"
+            f"Model: {model_info}{timing}\n"
             f"-------------\n\n"
             f"{content}\n\n"
             f"To stop or manage this job, send me a new message (e.g. \"stop reminder {task_name}\")."
@@ -677,6 +691,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
     prompt = _build_job_prompt(job)
     origin = _resolve_origin(job)
     _cron_session_id = f"cron_{job_id}_{_hermes_now().strftime('%Y%m%d_%H%M%S')}"
+    _job_start_time = time.time()
 
     logger.info("Running job '%s' (ID: %s)", job_name, job_id)
     logger.info("Prompt: %s", prompt[:100])
@@ -941,6 +956,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
 """
         
         logger.info("Job '%s' completed successfully", job_name)
+        job["_elapsed_seconds"] = time.time() - _job_start_time
         return True, output, final_response, None
         
     except Exception as e:
@@ -963,6 +979,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
 {error_msg}
 ```
 """
+        job["_elapsed_seconds"] = time.time() - _job_start_time
         return False, output, "", error_msg
 
     finally:
