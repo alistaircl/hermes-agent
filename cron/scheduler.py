@@ -332,6 +332,7 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
                 timing = f" | {elapsed_s:.1f}s"
         delivery_content = (
             f"Cronjob Response: {task_name}\n"
+            f"Run Time: {_hermes_now().strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"(job_id: {job_id})\n"
             f"Model: {model_info}{timing}\n"
             f"-------------\n\n"
