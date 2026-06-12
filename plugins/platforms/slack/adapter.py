@@ -3243,6 +3243,7 @@ class SlackAdapter(BasePlatformAdapter):
         command: str,
         session_key: str,
         description: str = "dangerous command",
+        justification: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> SendResult:
         """Send a Block Kit approval prompt with interactive buttons.

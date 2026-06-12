@@ -1999,6 +1999,7 @@ class MatrixAdapter(BasePlatformAdapter):
         command: str,
         session_key: str,
         description: str = "dangerous command",
+        justification: Optional[str] = None,
         metadata: Optional[dict] = None,
     ) -> SendResult:
         """Send a reaction-based exec approval prompt for Matrix."""
