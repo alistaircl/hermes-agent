@@ -30,7 +30,7 @@ patches:
       - path: gateway/platforms/telegram.py
         markers:
           - "justification: Optional[str]"
-      - path: gateway/platforms/discord.py
+      - path: plugins/platforms/discord/adapter.py
         markers:
           - "justification: Optional[str]"
           - "Agent Justification"
