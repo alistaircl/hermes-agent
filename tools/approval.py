@@ -20,6 +20,7 @@ import threading
 import time
 import hashlib
 import unicodedata
+import hashlib
 from typing import Optional
 from hermes_cli.config import cfg_get
 import hashlib
