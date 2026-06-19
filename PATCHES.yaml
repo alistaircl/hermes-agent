@@ -79,6 +79,29 @@ patches:
     original_commits: [a56394a5e]
     note: This patch survived the upstream sync (it was on the main branch, not security/enhancements)
 
+  - name: execute-code-guard
+    description: >
+      One-shot approval gate for execute_code tool in gateway/ask contexts.
+      execute_code runs arbitrary local Python that can spawn subprocesses
+      bypassing terminal() guards. In gateway/ask contexts we fail closed by
+      requiring whole-script approval before execution (#30882). In local
+      non-interactive non-gateway sessions this returns approved (matching
+      terminal auto-approve contract; hardline floor still blocks catastrophic
+      terminal() commands issued by the script).
+    files:
+      - path: tools/approval.py
+        markers:
+          - "check_execute_code_guard"
+          - 'pattern_key = "execute_code"'
+          - "execute_code script execution"
+          - "_is_gateway_approval_context"
+          - "HERMES_EXEC_ASK"
+          - "HERMES_CRON_SESSION"
+          - "_get_cron_approval_mode"
+          - "execute_code <<'PY'"
+    original_commits: []
+    restored_commit: HEAD
+
 reference_branches:
   - fork/security/enhancements
   - fork/feat/cron-header-meta
