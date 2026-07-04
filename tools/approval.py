@@ -9,17 +9,26 @@ This module is the single source of truth for the dangerous command system:
 """
 
 import contextvars
+import fnmatch
 import logging
 import os
 import re
 import sys
 import threading
 import time
-import unicodedata
 import hashlib
+import unicodedata
 from typing import Optional
+from hermes_cli.config import cfg_get
+
+from utils import env_var_enabled, is_truthy_value
 
 logger = logging.getLogger(__name__)
+
+# Freeze YOLO mode at module import time. Reading os.environ on every call
+# would allow any skill running inside the process to set this variable and
+# instantly bypass all approval checks — a prompt-injection escalation path.
+_YOLO_MODE_FROZEN: bool = is_truthy_value(os.getenv("HERMES_YOLO_MODE", ""))
 
 # Per-thread/per-task gateway session identity.
 # Gateway runs agent turns concurrently in executor threads, so reading a
@@ -430,6 +439,57 @@ _session_approved: dict[str, set] = {}
 _session_yolo: set[str] = set()
 _permanent_approved: set = set()
 
+# Justification gate state (added by approval-justification-gate patch).
+# Keyed by (session_key, cmd_hash) so concurrent approvals on the same
+# session don't collide. _pending_approvals holds the retry counter and
+# last-attempt metadata; _pending_justifications holds the actual
+# justification text once the agent provides it. _get_pending_justification
+# is shared between the detection phase (Phase 2.8) and the cleanup path
+# so the agent's justification propagates correctly to the approval prompt.
+_pending_approvals: dict[tuple[str, str], dict] = {}
+_pending_justifications: dict[tuple[str, str], str] = {}
+_MAX_JUSTIFICATION_RETRIES = 3
+
+
+def _get_pending_justification(session_key: str, cmd_hash: str) -> tuple:
+    """Retrieve pending justification for a session and command hash.
+
+    Returns:
+        tuple: (_, effective_justification, _, _) where effective_justification is the
+        stored justification string or None if not found.
+    """
+    with _lock:
+        key = (session_key, cmd_hash)
+        stored = _pending_justifications.get(key)
+        # Return as (ignored, effective_justification, ignored, ignored) to match unpacking
+        return (None, stored, None, None)
+
+
+def _is_gateway_approval_context() -> bool:
+    """True when this call is inside a gateway/API session.
+
+    Legacy gateway integrations set HERMES_GATEWAY_SESSION in process env.
+    Newer concurrent gateway paths bind HERMES_SESSION_PLATFORM via
+    contextvars (see ``gateway.session_context``) so approval mode does not
+    depend on process-global flags.
+
+    Cron jobs are NEVER gateway-approval contexts even when they originate
+    from a gateway platform — cron binds HERMES_SESSION_PLATFORM via
+    contextvars for delivery routing, but its approvals are governed by
+    ``approvals.cron_mode`` config rather than the interactive resolve path.
+    Letting cron fall through to the gateway branch would submit a pending
+    approval with no listener and block the job indefinitely.
+    """
+    if env_var_enabled("HERMES_CRON_SESSION"):
+        return False
+    if env_var_enabled("HERMES_GATEWAY_SESSION"):
+        return True
+    try:
+        from gateway.session_context import get_session_env as _gse
+        return bool(_gse("HERMES_SESSION_PLATFORM", ""))
+    except Exception:
+        return False
+
 # =========================================================================
 # Blocking gateway approval (mirrors CLI's synchronous input() flow)
 # =========================================================================
@@ -550,6 +610,15 @@ def clear_session(session_key: str) -> None:
         _session_yolo.discard(session_key)
         _pending.pop(session_key, None)
         _gateway_queues.pop(session_key, None)
+        # Justification-gate state: filter-comprehension because the keys are
+        # (session_key, cmd_hash) tuples, not session-keyed directly. Without
+        # this cleanup, abandoned sessions accumulate permanently and the
+        # dicts grow without bound across a long-lived gateway process.
+        # Caught by Step 9 check A of sync-fork-with-upstream-selectively.
+        for d in (_pending_approvals, _pending_justifications):
+            d_keys_to_drop = [k for k in d if k[0] == session_key]
+            for k in d_keys_to_drop:
+                d.pop(k, None)
 
 
 def is_session_yolo_enabled(session_key: str) -> bool:

@@ -27,20 +27,20 @@ patches:
         markers:
           - "justification = approval_data.get"
           - "justification=justification,"
-      - path: gateway/platforms/telegram.py
+      - path: plugins/platforms/telegram/adapter.py
         markers:
           - "justification: Optional[str]"
       - path: plugins/platforms/discord/adapter.py
         markers:
           - "justification: Optional[str]"
           - "Agent Justification"
-      - path: gateway/platforms/slack.py
+      - path: plugins/platforms/slack/adapter.py
         markers:
           - "justification: Optional[str]"
-      - path: gateway/platforms/matrix.py
+      - path: plugins/platforms/matrix/adapter.py
         markers:
           - "justification: Optional[str]"
-      - path: gateway/platforms/feishu.py
+      - path: plugins/platforms/feishu/adapter.py
         markers:
           - "justification: Optional[str]"
     original_commits: [e682e3f0c, 56ecda022]
