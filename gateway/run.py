@@ -4266,7 +4266,31 @@ class GatewayRunner:
                         user_args = event.get_command_args().strip()
                         event.text = f"{target} {user_args}".strip()
                         command = target_command
-                        # Fall through to normal command dispatch below
+                        # Recalculate canonical so the native-handler dispatch
+                        # below matches the *expanded* command, not the original
+                        # alias key. Without this, an alias like `/glm` →
+                        # `/model z-ai/glm-5.2 --provider nvidia` rewrites
+                        # event.text but canonical still holds `glm`, the
+                        # `if canonical == "model":` branch is skipped, and the
+                        # user gets "Unknown command /model z-ai/glm-5.2…".
+                        # See AGENTS.md "Command Dispatch Order".
+                        try:
+                            from hermes_cli.commands import resolve_command as _resolve_alias
+                            _alias_def = _resolve_alias(target_command) if target_command else None
+                            canonical = _alias_def.name if _alias_def else target_command
+                        except Exception:
+                            canonical = target_command
+                        # Direct dispatch to the native handler (if any). This
+                        # bypasses the now-stale `if canonical == "model":`
+                        # chain that was already evaluated before alias
+                        # expansion, so the rewritten command actually runs.
+                        _canonical_handler = canonical.replace("-", "_")
+                        _handler_name = f"_handle_{_canonical_handler}_command"
+                        _handler = getattr(self, _handler_name, None)
+                        if callable(_handler):
+                            return await _handler(event)
+                        # No native handler — fall through to plugin/skill
+                        # dispatch below with the refreshed canonical.
                     else:
                         return f"Quick command '/{command}' has no target defined."
                 else:
