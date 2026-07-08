@@ -4265,8 +4265,23 @@ class GatewayRunner:
                         target_command = target.lstrip("/")
                         user_args = event.get_command_args().strip()
                         event.text = f"{target} {user_args}".strip()
-                        command = target_command
-                        # Fall through to normal command dispatch below
+                        # CRITICAL: command must be just the command name (first word),
+                        # not the full expanded text including args. Otherwise the
+                        # downstream GATEWAY_KNOWN_COMMANDS check fails because
+                        # "model z-ai/glm-5.2 --provider nvidia" is not in the set.
+                        command = target_command.split()[0] if target_command.split() else target_command
+                        # Recalculate canonical from the extracted command name.
+                        try:
+                            from hermes_cli.commands import resolve_command as _resolve_alias
+                            _alias_def = _resolve_alias(command) if command else None
+                            canonical = _alias_def.name if _alias_def else command
+                        except Exception:
+                            canonical = command
+                        # Direct dispatch to the native handler (if any).
+                        _handler_name = f"_handle_{canonical.replace('-', '_')}_command"
+                        _handler = getattr(self, _handler_name, None)
+                        if callable(_handler):
+                            return await _handler(event)
                     else:
                         return f"Quick command '/{command}' has no target defined."
                 else:
@@ -6117,8 +6132,20 @@ class GatewayRunner:
 
         raw_args = event.get_command_args().strip()
 
-        # Parse --provider and --global flags
-        model_input, explicit_provider, persist_global = parse_model_flags(raw_args)
+        # Parse --provider, --global, --session, and --refresh flags
+        (
+            model_input,
+            explicit_provider,
+            _is_global_flag,
+            _force_refresh,
+            _is_session,
+        ) = parse_model_flags(raw_args)
+        # Resolve effective persistence (matches CLI behaviour in cli.py)
+        try:
+            from hermes_cli.model_switch import resolve_persist_behavior
+            persist_global = resolve_persist_behavior(_is_global_flag, _is_session)
+        except Exception:
+            persist_global = _is_global_flag
 
         # Read current model/provider from config
         current_model = ""
