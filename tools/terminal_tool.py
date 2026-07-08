@@ -2745,3 +2745,19 @@ registry.register(
     emoji="💻",
     max_result_size_chars=100_000,
 )
+
+_HOST_CWD_PREFIXES = frozenset({
+    "C:\\", "C:/", "/home/", "/Users/", ".", "src/"
+})
+
+def _is_unusable_container_cwd(cwd: str) -> bool:
+    if not cwd:
+        return False
+    if any(cwd.startswith(p) for p in _HOST_CWD_PREFIXES):
+        return True
+    if not cwd.startswith("/"):
+        return True
+    # Valid in-container paths
+    if cwd in {"/workspace", "/root", "/app", "/opt/project"}:
+        return False
+    return False
