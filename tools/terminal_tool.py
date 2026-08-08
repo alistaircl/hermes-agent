@@ -2763,7 +2763,18 @@ def terminal_tool(
                         "smart_denied": approval.get("smart_denied", False),
                         "allow_permanent": approval.get("allow_permanent", True),
                     }, ensure_ascii=False)
-                # Command was blocked
+                # Self-correction: model gets one retry with hint before user approval
+                if approval.get("status") == "self_correct":
+                    return json.dumps({
+                        "output": "",
+                        "exit_code": -1,
+                        "error": approval.get("message", "Command blocked — try a safer approach"),
+                        "status": "self_correct",
+                        "command": approval.get("command", command),
+                        "description": approval.get("description", "command flagged"),
+                        "safer_hint": approval.get("safer_hint", ""),
+                    }, ensure_ascii=False)
+                # Command was blocked (hard deny / smart denial / retry after self-correct)
                 desc = approval.get("description", "command flagged")
                 fallback_msg = (
                     f"Command denied: {desc}. "
