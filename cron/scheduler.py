@@ -3270,9 +3270,23 @@ def _deliver_result(
     if wrap_response:
         task_name = job.get("name", job["id"])
         job_id = job.get("id", "")
+        model = job.get("model", "")
+        provider = job.get("provider", "")
+        model_info = f"{provider}/{model}" if provider and model else model or "default"
+        # Include run time if available
+        timing = ""
+        elapsed_s = job.get("_elapsed_seconds")
+        if elapsed_s is not None:
+            if elapsed_s >= 60:
+                m, s = divmod(int(elapsed_s), 60)
+                timing = f" | {m}m {s}s"
+            else:
+                timing = f" | {elapsed_s:.1f}s"
         delivery_content = (
             f"Cronjob Response: {task_name}\n"
+            f"Run Time: {_hermes_now().strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"(job_id: {job_id})\n"
+            f"Model: {model_info}{timing}\n"
             f"-------------\n\n"
             f"{content}\n\n"
             f"To stop or manage this job, send me a new message (e.g. \"stop reminder {task_name}\")."
@@ -5825,6 +5839,7 @@ def run_job(
     """
     job_id = job["id"]
     job_name = str(job.get("name") or job.get("prompt") or job_id or "cron job")
+    _job_start_time = time.time()
 
     # Fail closed on a corrupt config.yaml before any agent-driven work
     # (issue #81952): a cron fire is fully non-interactive, and continuing
@@ -7068,6 +7083,7 @@ def run_job(
 """
         
         logger.info("Job '%s' completed successfully", job_name)
+        job["_elapsed_seconds"] = time.time() - _job_start_time
 
         # Emit one JSONL line per fire for usage audit.
         _audit_duration_ms = int((time.monotonic() - _audit_t_start) * 1000)
@@ -7125,6 +7141,7 @@ def run_job(
 {error_msg}
 ```
 """
+        job["_elapsed_seconds"] = time.time() - _job_start_time
         return False, output, "", error_msg
 
     finally:
