@@ -909,6 +909,7 @@ def _format_exec_approval_fallback(
     allow_permanent: bool = True,
     allow_session: bool = True,
     smart_denied: bool = False,
+    justification: str | None = None,
 ) -> str:
     """Render the text fallback from approval capabilities, not platform names."""
     cmd_preview = command[:200] + "..." if len(command) > 200 else command
@@ -926,6 +927,7 @@ def _format_exec_approval_fallback(
     choices.append(f"`{command_prefix}deny` to cancel")
     return (
         f"{heading}\n```\n{cmd_preview}\n```\nReason: {description}\n\n"
+        + (f"\n\ud83d\udca1 Agent justification: {justification}\n\n" if justification else "")
         + ", ".join(choices[:-1]) + f", or {choices[-1]}."
     )
 
@@ -6839,16 +6841,28 @@ class TurnRunner:
             # false positives from MagicMock auto-attribute creation in tests.
             if getattr(type(ctx._status_adapter), "send_exec_approval", None) is not None:
                 try:
+                    _exec_approval_kwargs = {
+                        "chat_id": ctx._status_chat_id,
+                        "command": cmd,
+                        "session_key": _approval_session_key,
+                        "description": desc,
+                        "metadata": ctx._status_thread_metadata,
+                        "allow_permanent": approval_data.get("allow_permanent", True),
+                        "allow_session": approval_data.get("allow_session", True),
+                        "smart_denied": approval_data.get("smart_denied", False),
+                    }
+                    # Signature-guarded (issue #6959): only pass the model's
+                    # justification to adapters whose send_exec_approval
+                    # accepts it; relay/native adapters with older signatures
+                    # keep working unchanged.
+                    if "justification" in inspect.signature(
+                        type(ctx._status_adapter).send_exec_approval
+                    ).parameters:
+                        _exec_approval_kwargs["justification"] = \
+                            approval_data.get("justification")
                     _approval_fut = safe_schedule_threadsafe(
                         ctx._status_adapter.send_exec_approval(
-                            chat_id=ctx._status_chat_id,
-                            command=cmd,
-                            session_key=_approval_session_key,
-                            description=desc,
-                            metadata=ctx._status_thread_metadata,
-                            allow_permanent=approval_data.get("allow_permanent", True),
-                            allow_session=approval_data.get("allow_session", True),
-                            smart_denied=approval_data.get("smart_denied", False),
+                            **_exec_approval_kwargs
                         ),
                         ctx._loop_for_step,
                         logger=logger,
@@ -6894,6 +6908,7 @@ class TurnRunner:
                 allow_permanent=approval_data.get("allow_permanent", True),
                 allow_session=approval_data.get("allow_session", True),
                 smart_denied=approval_data.get("smart_denied", False),
+                justification=approval_data.get("justification"),
             )
             try:
                 # Mark as approval prompt so WeCom routes through control lane
