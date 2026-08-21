@@ -16533,8 +16533,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
 
     def _approval_callback(self, command: str, description: str,
                            *, allow_permanent: bool = True,
-                           allow_session: bool = True,
-                           smart_denied: bool = False) -> str:
+                           smart_denied: bool = False,
+                           justification: str = "") -> str:
         """
         Prompt for dangerous command approval through the prompt_toolkit UI.
 
@@ -16559,6 +16559,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             self._approval_state = {
                 "command": command,
                 "description": description,
+                "justification": justification,
                 "choices": self._approval_choices(
                     command,
                     allow_permanent=allow_permanent,
@@ -16718,6 +16719,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         choices = state["choices"]
         selected = state.get("selected", 0)
         show_full = state.get("show_full", False)
+        justification = state.get("justification") or ""
 
         title = "⚠️  Dangerous Command"
         cmd_display = command
@@ -16749,6 +16751,10 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                 "… (choose Show full command)",
                 inner_text_width,
             )
+
+        just_wrapped = _wrap_panel_text(
+            f"Agent justification: {justification}", inner_text_width
+        ) if justification else []
 
         # (choice_index, wrapped_line) so we can re-apply selected styling below
         choice_wrapped: list[tuple[int, str]] = []
@@ -16785,7 +16791,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         reserved_below = 6
 
         available = max(0, term_rows - reserved_below)
-        mandatory_full = chrome_full + len(cmd_wrapped) + len(choice_wrapped)
+        mandatory_full = chrome_full + len(cmd_wrapped) + len(just_wrapped) + len(choice_wrapped)
 
         # If the full-chrome panel doesn't fit, drop the separator blanks.
         # This keeps the command and every choice on-screen in compact terminals.
@@ -16830,6 +16836,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
 
         for wrapped in cmd_wrapped:
             _append_panel_line(lines, 'class:approval-border', 'class:approval-cmd', wrapped, box_width)
+        for wrapped in just_wrapped:
+            _append_panel_line(lines, 'class:approval-border', 'class:approval-desc', wrapped, box_width)
         if not use_compact_chrome:
             _append_blank_panel_line(lines, 'class:approval-border', box_width)
 
