@@ -382,11 +382,13 @@ def _docker_has_host_access(config: Dict[str, Any]) -> bool:
 
 
 def _check_all_guards(command: str, env_type: str,
-                      has_host_access: bool = False) -> dict:
+                      has_host_access: bool = False,
+                      justification: Optional[str] = None) -> dict:
     """Delegate to consolidated guard (tirith + dangerous cmd) with CLI callback."""
     return _check_all_guards_impl(command, env_type,
                                   approval_callback=_get_approval_callback(),
-                                  has_host_access=has_host_access)
+                                  has_host_access=has_host_access,
+                                  justification=justification)
 
 
 # Allowlist: characters that can legitimately appear in directory paths.
@@ -2828,6 +2830,7 @@ def terminal_tool(
     pty: bool = False,
     notify_on_complete: bool = False,
     watch_patterns: Optional[List[str]] = None,
+    justification: Optional[str] = None,
 ) -> str:
     """
     Execute a command in the configured terminal environment.
@@ -3237,6 +3240,7 @@ def terminal_tool(
             approval = _check_all_guards(
                 command, env_type,
                 has_host_access=_docker_has_host_access(config),
+                justification=justification,
             )
             if not approval["approved"]:
                 # Check if this is an approval_required (gateway ask mode)
@@ -4103,6 +4107,10 @@ TERMINAL_SCHEMA = {
                 "type": "string",
                 "description": "The command to execute on the VM"
             },
+            "justification": {
+                "type": "string",
+                "description": "REQUIRED whenever the command may need user approval: one concise sentence explaining why you need to run this specific command and what it accomplishes. Shown verbatim to the user in the approval prompt. Ignored otherwise."
+            },
             "background": {
                 "type": "boolean",
                 "description": "Run in the background, returning a session_id. Pair with notify_on_complete=true for anything with a defined end (tests, builds, deploys) — without it the process runs silently. Only servers/watchers/daemons that never exit should stay silent. Short commands: prefer foreground with a generous timeout.",
@@ -4138,6 +4146,10 @@ TERMINAL_SCHEMA = {
 }
 
 
+# IMPORTANT: when adding a parameter to terminal_tool(), forward it here too.
+# Required forwards: command, background, timeout, task_id, session_id,
+# workdir, pty, notify_on_complete, watch_patterns, justification.
+# justification is model-provided (issue #6959); shown in approval prompts.
 def _handle_terminal(args, **kw):
     # Mirror of execute_code's misplaced-argument recovery: models sometimes
     # send execute_code's ``code`` argument here. Without this, the call
@@ -4160,6 +4172,7 @@ def _handle_terminal(args, **kw):
         pty=args.get("pty", False),
         notify_on_complete=args.get("notify_on_complete", False),
         watch_patterns=args.get("watch_patterns"),
+        justification=args.get("justification"),
     )
 
 

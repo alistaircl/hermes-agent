@@ -4261,6 +4261,7 @@ class BasePlatformAdapter(ABC):
         command: str,
         description: str = "dangerous command",
         smart_denied: bool = False,
+        justification: str | None = None,
     ) -> str:
         """Shared formatting core for exec-approval prompt text.
 
@@ -4276,6 +4277,11 @@ class BasePlatformAdapter(ABC):
             f"{self._EA_CODE_OPEN}{self._ea_escape(cmd_preview)}{self._EA_CODE_CLOSE}"
             f"{self._EA_REASON_LABEL}{self._ea_escape(description)}"
         )
+        if justification:
+            text += (
+                "\n\n\U0001f4a1 Agent justification:\n"
+                f"{self._ea_escape(justification)}"
+            )
         if smart_denied:
             text += self._EA_SMART_DENY_LINE
         return text
