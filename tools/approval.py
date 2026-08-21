@@ -5228,7 +5228,8 @@ def check_all_command_guards(command: str, env_type: str,
 
 
 def check_execute_code_guard(code: str, env_type: str,
-                             has_host_access: bool = False) -> dict:
+                             has_host_access: bool = False,
+                             justification: str | None = None) -> dict:
     """Approve an execute_code script before its child process is spawned.
 
     execute_code runs arbitrary local Python — the script can call
@@ -5551,6 +5552,7 @@ def check_execute_code_guard(code: str, env_type: str,
             "pattern_key": pattern_key,
             "pattern_keys": [pattern_key],
             "description": display_description,
+            "justification": redact_sensitive_text(justification) if justification else "",
         }
         if smart_denied_for_owner:
             pending_data.update(smart_denied=True, allow_permanent=False)
@@ -5580,6 +5582,8 @@ def check_execute_code_guard(code: str, env_type: str,
         "pattern_key": pattern_key,
         "pattern_keys": [pattern_key],
         "description": display_description,
+        # Model-supplied justification (issue #6959): advisory only.
+        "justification": redact_sensitive_text(justification) if justification else "",
         "allow_permanent": not smart_denied_for_owner,
         "allow_session": not smart_denied_for_owner,
     }
