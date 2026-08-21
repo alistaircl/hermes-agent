@@ -367,9 +367,9 @@ _TOOL_STUBS = {
     ),
     "terminal": (
         "terminal",
-        "command: str, timeout: int = None, workdir: str = None",
-        '"""Run a shell command (foreground only). Returns dict with "output" and "exit_code"."""',
-        '{"command": command, "timeout": timeout, "workdir": workdir}',
+        "command: str, timeout: int = None, workdir: str = None, justification: str = None",
+        '"""Run a shell command (foreground only). Returns dict with "output" and "exit_code". justification (issue #6959) is accepted for signature compatibility and ignored inside the sandbox."""',
+        '{"command": command, "timeout": timeout, "workdir": workdir, "justification": justification}',
     ),
 }
 
@@ -1257,6 +1257,7 @@ def execute_code(
     code: str,
     task_id: Optional[str] = None,
     enabled_tools: Optional[List[str]] = None,
+    justification: Optional[str] = None,
 ) -> str:
     """
     Run a Python script in a sandboxed child process with RPC access
@@ -1298,6 +1299,7 @@ def execute_code(
     _guard = check_execute_code_guard(
         code, env_type,
         has_host_access=_docker_has_host_access(_env_config),
+        justification=justification,
     )
     if not _guard.get("approved", False):
         return json.dumps({
@@ -2049,6 +2051,15 @@ def build_execute_code_schema(enabled_sandbox_tools: set = None,
                         "and print your final result to stdout."
                     ),
                 },
+                "justification": {
+                    "type": "string",
+                    "description": (
+                        "REQUIRED whenever the script may need user approval: one "
+                        "concise sentence explaining why you need to run this "
+                        "specific script and what it accomplishes. Shown verbatim "
+                        "to the user in the approval prompt. Ignored otherwise."
+                    ),
+                },
             },
             "required": ["code"],
         },
@@ -2070,7 +2081,8 @@ registry.register(
     handler=lambda args, **kw: execute_code(
         code=args.get("code", ""),
         task_id=kw.get("task_id"),
-        enabled_tools=kw.get("enabled_tools")),
+        enabled_tools=kw.get("enabled_tools"),
+        justification=args.get("justification")),
     check_fn=check_sandbox_requirements,
     emoji="🐍",
     max_result_size_chars=100_000,
