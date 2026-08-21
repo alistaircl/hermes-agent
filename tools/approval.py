@@ -2965,7 +2965,8 @@ def prompt_dangerous_approval(command: str, description: str,
                               timeout_seconds: int | None = None,
                               allow_permanent: bool = True,
                               approval_callback=None,
-                              *, smart_denied: bool = False) -> str:
+                              *, smart_denied: bool = False,
+                              justification: str = "") -> str:
     """Prompt the user to approve a dangerous command (CLI only).
 
     Args:
@@ -3000,6 +3001,7 @@ def prompt_dangerous_approval(command: str, description: str,
             allow_permanent,
             approval_callback,
             smart_denied=smart_denied,
+            justification=justification,
         )
 
 
@@ -3007,7 +3009,8 @@ def _prompt_dangerous_approval_inner(command: str, description: str,
                                      timeout_seconds: int,
                                      allow_permanent: bool = True,
                                      approval_callback=None,
-                                     *, smart_denied: bool = False) -> str:
+                                     *, smart_denied: bool = False,
+                                     justification: str = "") -> str:
     # Redact secrets before any user-visible rendering. The original
     # `command` is still what executes after approval; only the displayed
     # copy is scrubbed. Reuses the same redaction module used for memory
@@ -3021,6 +3024,8 @@ def _prompt_dangerous_approval_inner(command: str, description: str,
             callback_kwargs = {"allow_permanent": allow_permanent}
             if smart_denied:
                 callback_kwargs["smart_denied"] = True
+            if justification:
+                callback_kwargs["justification"] = justification
             return approval_callback(
                 display_command, display_description, **callback_kwargs
             )
@@ -4341,7 +4346,8 @@ def _await_gateway_decision(session_key: str, notify_cb, approval_data: dict,
 
 def check_all_command_guards(command: str, env_type: str,
                              approval_callback=None,
-                             has_host_access: bool = False) -> dict:
+                             has_host_access: bool = False,
+                             justification: str | None = None) -> dict:
     """Run all pre-exec security checks and return a single approval decision.
 
     Gathers findings from tirith and dangerous-command detection, then
@@ -4774,6 +4780,9 @@ def check_all_command_guards(command: str, env_type: str,
                 "pattern_key": primary_key,
                 "pattern_keys": all_keys,
                 "description": redact_sensitive_text(combined_desc),
+                # Model-supplied justification (issue #6959): shown verbatim in
+                # the approval prompt. Advisory only — never affects gating.
+                "justification": redact_sensitive_text(justification) if justification else "",
                 # Smart DENY overrides are one-operation decisions, so the UI
                 # must not offer a permanent scope.  Otherwise offer Always
                 # whenever any dangerous-pattern warning can actually be
@@ -4879,6 +4888,9 @@ def check_all_command_guards(command: str, env_type: str,
                 "pattern_key": primary_key,
                 "pattern_keys": all_keys,
                 "description": _disp_combined_desc,
+                # Model-supplied justification (issue #6959): shown verbatim in
+                # the approval prompt. Advisory only — never affects gating.
+                "justification": redact_sensitive_text(justification) if justification else "",
             }
             if smart_denied_for_owner:
                 pending_data.update(smart_denied=True, allow_permanent=False)
@@ -4919,6 +4931,7 @@ def check_all_command_guards(command: str, env_type: str,
         allow_permanent=has_permanent_capable and not smart_denied_for_owner,
         smart_denied=smart_denied_for_owner,
         approval_callback=approval_callback,
+        justification=justification or "",
     )
     _fire_approval_hook(
         "post_approval_response",
