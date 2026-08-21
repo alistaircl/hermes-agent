@@ -194,7 +194,8 @@ def prompt_for_secret(cli, var_name: str, prompt: str, metadata=None) -> dict:
     }
 
 
-def approval_callback(cli, command: str, description: str) -> str:
+def approval_callback(cli, command: str, description: str,
+                      *, justification: str = "") -> str:
     """Prompt for dangerous command approval through the TUI.
 
     Shows a selection UI with choices: once / session / always / deny.
@@ -221,6 +222,7 @@ def approval_callback(cli, command: str, description: str) -> str:
         cli._approval_state = {
             "command": command,
             "description": description,
+            "justification": justification,
             "choices": choices,
             "selected": 0,
             "response_queue": response_queue,

@@ -5539,6 +5539,7 @@ class TelegramAdapter(BasePlatformAdapter):
         allow_permanent: bool = True,
         allow_session: bool = True,
         smart_denied: bool = False,
+        justification: Optional[str] = None,
     ) -> SendResult:
         """Send an inline-keyboard approval prompt with interactive buttons.
 
@@ -5549,7 +5550,10 @@ class TelegramAdapter(BasePlatformAdapter):
             return SendResult(success=False, error="Not connected")
 
         try:
-            text = self._format_exec_approval(command, description, smart_denied)
+            text = self._format_exec_approval(
+                command, description, smart_denied,
+                justification=justification,
+            )
 
             # Resolve thread context for thread replies
             thread_id = self._metadata_thread_id(metadata)
