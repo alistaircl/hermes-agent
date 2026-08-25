@@ -2182,7 +2182,7 @@ def build_execute_code_schema(enabled_sandbox_tools: set = None,
                     ),
                 },
             },
-            "required": ["code"],
+            "required": ["code", "justification"],
         },
     }
 

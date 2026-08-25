@@ -4584,6 +4584,11 @@ def check_all_command_guards(command: str, env_type: str,
     such a session is no longer isolated, so it goes through the normal flow
     instead of the container fast-path.
     """
+    # Justification is schema-required for terminal calls; when a model or
+    # legacy caller omits it anyway, render an explicit placeholder in the
+    # approval card rather than silently dropping the section (#6959).
+    justification = justification if (justification and justification.strip()) \
+        else "(no justification supplied by model)"
     # Skip isolated container backends for both checks. Docker stops skipping
     # once host paths are bind-mounted into the sandbox.
     if _should_skip_container_guards(env_type, has_host_access=has_host_access):
@@ -5253,6 +5258,11 @@ def check_execute_code_guard(code: str, env_type: str,
         "mutate files without passing through terminal command approval; "
         "approval is one-shot for this run."
     )
+    # Justification is schema-required for execute_code calls; when a model
+    # omits it anyway, render an explicit placeholder in the approval card
+    # rather than silently dropping the section (#6959).
+    justification = justification if (justification and justification.strip()) \
+        else "(no justification supplied by model)"
 
     # Isolated backends already sandbox the child — matches the container skip
     # in check_all_command_guards / check_dangerous_command. Docker stops
