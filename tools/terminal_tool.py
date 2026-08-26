@@ -4109,7 +4109,7 @@ TERMINAL_SCHEMA = {
             },
             "justification": {
                 "type": "string",
-                "description": "REQUIRED whenever the command may need user approval: one concise sentence explaining why you need to run this specific command and what it accomplishes. Shown verbatim to the user in the approval prompt. Ignored otherwise."
+                "description": "REQUIRED whenever the command may need user approval: one concise sentence explaining why you need to run this specific command and what it accomplishes. Shown verbatim to the user in the approval prompt — omitting it makes the approval card useless to them and may get the command denied. Ignored only for commands that never trigger approval."
             },
             "background": {
                 "type": "boolean",
@@ -4141,8 +4141,8 @@ TERMINAL_SCHEMA = {
                 "description": "Strings to watch for in background output. ONLY for rare one-shot mid-process signals on processes that never exit (e.g. ['Application startup complete'] on a server). NOT for end-of-run markers (use notify_on_complete) and NOT for per-iteration patterns like 'ERROR' in loops — rate-limited to 1 notification/15s, capped at a small number of matches over the process's lifetime; over-firing auto-disables it and falls back to notify-on-exit. When in doubt, use notify_on_complete. MUTUALLY EXCLUSIVE with notify_on_complete."
             }
         },
-        "required": ["command", "justification"]
-    }
+        "required": ["command"],
+    },
 }
 
 

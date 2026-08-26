@@ -2178,11 +2178,14 @@ def build_execute_code_schema(enabled_sandbox_tools: set = None,
                         "REQUIRED whenever the script may need user approval: one "
                         "concise sentence explaining why you need to run this "
                         "specific script and what it accomplishes. Shown verbatim "
-                        "to the user in the approval prompt. Ignored otherwise."
+                        "to the user in the approval prompt — omitting it makes "
+                        "the approval card useless to them and may get the script "
+                        "denied. Ignored only for scripts that never trigger "
+                        "approval."
                     ),
                 },
             },
-            "required": ["code", "justification"],
+            "required": ["code"],
         },
     }
 
