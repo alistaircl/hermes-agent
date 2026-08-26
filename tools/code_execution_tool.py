@@ -2231,7 +2231,7 @@ def _execute_code_handler(args: dict, **kwargs) -> str:
         code=code or "",
         task_id=kwargs.get("task_id"),
         enabled_tools=kwargs.get("enabled_tools"),
-        justification=kwargs.get("justification"),
+        justification=args.get("justification") or kwargs.get("justification"),
     )
 
 
