@@ -4161,7 +4161,7 @@ TERMINAL_SCHEMA = {
             },
             "justification": {
                 "type": "string",
-                "description": "REQUIRED whenever the command may need user approval: one concise sentence explaining why you need to run this specific command and what it accomplishes. Shown verbatim to the user in the approval prompt. Ignored otherwise."
+                "description": "REQUIRED whenever the command may need user approval: one concise sentence explaining why you need to run this specific command and what it accomplishes. Shown verbatim to the user in the approval prompt — omitting it makes the approval card useless to them and may get the command denied. Ignored only for commands that never trigger approval."
             },
             "background": {
                 "type": "boolean",
@@ -4193,8 +4193,8 @@ TERMINAL_SCHEMA = {
             # (bool) and watch_patterns (list). notify=true|[...] maps onto
             # them in the dispatch wrapper; explicit notify wins on conflict.
         },
-        "required": ["command", "justification"]
-    }
+        "required": ["command"],
+    },
 }
 
 
