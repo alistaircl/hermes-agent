@@ -1458,7 +1458,10 @@ class TurnRunner:
         # command string still leaks secrets. Both the button and plain-text paths use this value.
         cmd = _redact_approval_command(approval_data.get("command", ""))
         desc = approval_data.get("description", "dangerous command")
+        just = approval_data.get("justification")
         flags = {k: approval_data.get(k, d) for k, d in (("allow_permanent", True), ("allow_session", True), ("smart_denied", False))}
+        if just:
+            flags["justification"] = just
         # Check the *class*, not the instance — MagicMock auto-creates attributes in tests.
         if _renders_exec_approval_buttons(type(adapter)):
             try:

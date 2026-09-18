@@ -666,6 +666,7 @@ def execute_code(
     task_id: Optional[str] = None,
     enabled_tools: Optional[List[str]] = None,
     reset: bool = False,
+    justification: Optional[str] = None,
 ) -> str:
     """Run Python in the session's persistent kernel (local) or on the remote terminal backend,
     with RPC access to a subset of Hermes tools; returns the JSON result string. "Sandbox" means
@@ -731,7 +732,8 @@ def execute_code(
     # the session context. A Docker sandbox with host bind mounts gets no container fast-path.
     # See #30882.
     from tools.approval import check_execute_code_guard
-    _guard = check_execute_code_guard(code, env_type, has_host_access=_docker_has_host_access(_env_config))
+    _guard = check_execute_code_guard(code, env_type, has_host_access=_docker_has_host_access(_env_config),
+                                     justification=justification)
     if not _guard.get("approved", False):
         return _error_result(_guard.get("message") or "execute_code blocked by approval guard.",
                              user_summary=_guard.get("user_summary"))
@@ -894,6 +896,10 @@ def build_execute_code_schema(enabled_sandbox_tools: set = None,
                     "and print your final result to stdout.")},
                 "reset": {"type": "boolean", "description": (
                     "Discard the kernel's persistent state and start fresh before running this code.")},
+                "justification": {"type": "string", "description": (
+                    "Optional one-sentence summary shown verbatim on the approval card. "
+                    "Provide it on calls you expect to need approval; omitting shows "
+                    "'(no justification supplied by model)'.")},
             },
             "required": ["code"],
         },
@@ -917,7 +923,8 @@ def _execute_code_handler(args: dict, **kwargs) -> str:
         return tool_error(f"execute_code received a {type(code).__name__} in 'code', but it "
                           "requires Python source as a string. Retry as execute_code(code=\"...\").")
     return execute_code(code=code or "", task_id=kwargs.get("task_id"),
-                        enabled_tools=kwargs.get("enabled_tools"), reset=bool(args.get("reset", False)))
+                        enabled_tools=kwargs.get("enabled_tools"), reset=bool(args.get("reset", False)),
+                        justification=args.get("justification") or kwargs.get("justification"))
 
 
 registry.register(

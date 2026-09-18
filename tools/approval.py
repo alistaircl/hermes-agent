@@ -794,7 +794,8 @@ def _human_decision(spec: _GateSpec, *, command: str, description: str,
                     pattern_key: str, pattern_keys: list[str], warnings: list[tuple],
                     session_key: str, approval_callback, is_cli: bool, is_gateway: bool,
                     is_ask: bool, smart: bool = False,
-                    permanent_capable: bool = True, pending_body=None) -> dict:
+                    permanent_capable: bool = True, pending_body=None,
+                    justification: Optional[str] = None) -> dict:
     """Ask a human (after the optional guardian-LLM step) and turn the answer into the gate result.
 
     ``warnings`` are the ``(key, _, is_tirith)`` tuples :func:`_persist_choice` stores on
@@ -865,6 +866,8 @@ def _human_decision(spec: _GateSpec, *, command: str, description: str,
                 "allow_permanent": permanent_capable and not smart_denied,
                 "allow_session": not smart_denied,
             }
+            if justification:
+                data["justification"] = justification
             if smart_denied:
                 data["smart_denied"] = True
             decision = _await_gateway_decision(session_key, notify_cb, data, surface="gateway")
@@ -1157,7 +1160,8 @@ def _tirith_scan(command: str) -> dict:
 
 def check_all_command_guards(command: str, env_type: str,
                              approval_callback=None,
-                             has_host_access: bool = False) -> dict:
+                             has_host_access: bool = False,
+                             justification: Optional[str] = None) -> dict:
     """Run all pre-exec security checks and return a single approval decision. Tirith and
     dangerous-command findings are presented as ONE combined approval request, so a gateway
     force=True replay cannot bypass one check when only the other was shown to the user.
@@ -1220,6 +1224,7 @@ def check_all_command_guards(command: str, env_type: str,
         session_key=session_key, approval_callback=approval_callback,
         is_cli=is_cli, is_gateway=is_gateway, is_ask=is_ask, smart=approval_mode == "smart",
         permanent_capable=any(not is_t for _, _, is_t in warnings),
+        justification=justification,
     )
 
 
@@ -1229,7 +1234,8 @@ _EXECUTE_CODE_DESCRIPTION = (
 )
 
 
-def check_execute_code_guard(code: str, env_type: str, has_host_access: bool = False) -> dict:
+def check_execute_code_guard(code: str, env_type: str, has_host_access: bool = False,
+                               justification: Optional[str] = None) -> dict:
     """Approve an execute_code script before its child process is spawned.
 
     The script can call ``subprocess``/``os.system``/``ctypes`` directly, none of which pass
@@ -1286,6 +1292,11 @@ def check_execute_code_guard(code: str, env_type: str, has_host_access: bool = F
     if is_approved(session_key, pattern_key):
         return _approved()
 
+    # Normalize blank/None to a placeholder for downstream renderers.
+    justification = justification.strip() if justification else None
+    if not justification:
+        justification = "(no justification supplied by model)"
+
     # Smart mode: an APPROVE only suppresses the redundant whole-script prompt; the per-call terminal() guards still
     # run independently. The gateway renders the pending payload to Discord/Slack, so the script body is redacted for
     # display; the raw code is what gets assessed and run.
@@ -1296,6 +1307,7 @@ def check_execute_code_guard(code: str, env_type: str, has_host_access: bool = F
         approval_callback=approval_callback, is_cli=is_cli, is_gateway=is_gateway, is_ask=is_ask,
         smart=approval_mode == "smart",
         pending_body=lambda: f"**Code:**\n```python\n{redact_sensitive_text(code)}\n```",
+        justification=justification,
     )
 
 

@@ -1589,6 +1589,7 @@ class ExecApprovalPrompt:
     command: str
     description: str
     smart_denied: bool
+    justification: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
     @property
@@ -2572,6 +2573,7 @@ class BasePlatformAdapter(ABC):
     _EA_REASON_LABEL: str = f"{EA_REASON_LABEL_TEXT}: "
     _EA_DEADLINE_PREFIX: str = "\n\n"  # separates the deadline line from the reason line
     _EA_SMART_DENY_LINE: str = "\n\nSmart DENY: owner override applies to this one operation only."
+    _EA_JUSTIFICATION_PREFIX: str = "\nAgent justification: "
     _EA_CMD_BUDGET: int = 3000
     _EA_REASON_BUDGET: int = 0  # 0 = the reason is never truncated
 
@@ -2613,7 +2615,8 @@ class BasePlatformAdapter(ABC):
         return self._EA_DEADLINE_PREFIX + self._ea_escape(format_approval_deadline_line(approval_timeout_seconds()))
 
     def _format_exec_approval(
-        self, command: str, description: str = "dangerous command", smart_denied: bool = False) -> str:
+        self, command: str, description: str = "dangerous command", smart_denied: bool = False,
+        justification: Optional[str] = None) -> str:
         """Shared exec-approval prompt text: header + fenced (truncated) command + why it was
         flagged + the deadline line, plus the smart-deny line. Buttons/trailing instructions stay
         platform-local."""
@@ -2625,6 +2628,8 @@ class BasePlatformAdapter(ABC):
                 f"{self._EA_CODE_OPEN}{self._ea_escape(cmd_preview)}{self._EA_CODE_CLOSE}"
                 f"{self._EA_REASON_LABEL}{self._ea_escape(description)}"
                 f"{self._ea_deadline_line()}")
+        if justification:
+            text += f"\n{self._EA_JUSTIFICATION_PREFIX}{self._ea_escape(justification)}"
         return text + self._EA_SMART_DENY_LINE if smart_denied else text
 
     # ── Exec-approval prompt (template method). The choice set is one rule for every button
@@ -2655,15 +2660,15 @@ class BasePlatformAdapter(ABC):
     async def send_exec_approval(
         self, chat_id: str, command: str, session_key: str, description: str = "dangerous command",
         metadata: Optional[Dict[str, Any]] = None, allow_permanent: bool = True, allow_session: bool = True,
-        smart_denied: bool = False,
+        smart_denied: bool = False, justification: Optional[str] = None,
     ) -> SendResult:
         """Interactive exec-approval prompt; a press resolves via
         ``tools.approval.resolve_gateway_approval``. Text and choice set are shared; adapters
         render them natively in ``_send_exec_approval_prompt``."""
         prompt = ExecApprovalPrompt(
             chat_id=chat_id, session_key=session_key, metadata=metadata, command=str(command or ""),
-            description=description, smart_denied=smart_denied,
-            text=self._format_exec_approval(command, description, smart_denied),
+            description=description, smart_denied=smart_denied, justification=justification,
+            text=self._format_exec_approval(command, description, smart_denied, justification),
             actions=self._exec_approval_actions(
                 allow_permanent=allow_permanent, allow_session=allow_session, smart_denied=smart_denied))
         return await self._send_exec_approval_prompt(prompt)

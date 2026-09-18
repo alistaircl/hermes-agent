@@ -177,6 +177,7 @@ class CLITuiMixin:
         wrap = _wrap_panel_text_keep_ws
         command = state["command"]
         description = state["description"]
+        justification = state.get("justification", "")
         choices = state["choices"]
         selected = state.get("selected", 0)
         show_full = state.get("show_full", False)
@@ -244,6 +245,9 @@ class CLITuiMixin:
                 panel.blank()
             for wrapped in desc_wrapped:
                 panel.row('class:approval-desc', wrapped)
+        if justification:
+            panel.blank()
+            panel.row('class:approval-justification', f"Agent justification: {justification}")
         return panel.close()
 
     def _get_tui_prompt_symbols(self) -> tuple[str, str]:
