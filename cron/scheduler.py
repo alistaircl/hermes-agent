@@ -2292,6 +2292,7 @@ def run_job(
     to the stored prompt for this fire only — never persisted to the job definition.
     """
     job_id = job["id"]
+    job["_job_start_time"] = time.time()
     job_name = str(job.get("name") or job.get("prompt") or job_id or "cron job")
 
     early, prompt = _prepare_job_prompt(job, job_id, job_name, extra_prompt, cancel_event)
@@ -2338,6 +2339,7 @@ def run_job(
         logged_response = final_response if final_response else "(No response generated)"
         output = _run_doc_header(job, job_name, job_id, prompt) + f"## Response\n\n{logged_response}\n"
         logger.info("Job '%s' completed successfully", job_name)
+        job["_elapsed_seconds"] = time.time() - job["_job_start_time"]
         _audit.write(dict(result, response_silent=_is_cron_silence_response(final_response or "")), None)
         return True, output, final_response, None
 

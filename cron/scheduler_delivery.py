@@ -1899,9 +1899,24 @@ def _deliver_result(
     unverified_targets: list = []
     if wrap_response:
         task_name = job.get("name", job["id"])
+        model = job.get("model", "")
+        provider = job.get("provider", "")
+        model_info = f"{provider}/{model}" if provider and model else (model or "default")
+        elapsed_s = job.get("_elapsed_seconds")
+        timing = ""
+        if elapsed_s is not None:
+            elapsed_s = float(elapsed_s)
+            if elapsed_s >= 60:
+                m, s = divmod(int(elapsed_s), 60)
+                timing = f" | {m}m {s}s"
+            else:
+                timing = f" | {elapsed_s:.1f}s"
+        from hermes_time import now as _hermes_now
         delivery_content = (
             f"Cronjob Response: {task_name}\n"
+            f"Run Time: {_hermes_now().strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"(job_id: {job.get('id', '')})\n"
+            f"Model: {model_info}{timing}\n"
             f"-------------\n\n"
             f"{content}\n\n"
             "To stop or manage this job, send me a new message "
