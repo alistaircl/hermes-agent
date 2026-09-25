@@ -419,7 +419,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from gateway.config import Platform, PlatformConfig
 from gateway.platforms.helpers import fence_state_after
 from gateway.platforms.base_exec_approval import (
-    EA_HEADER_TEXT, EA_REASON_LABEL_TEXT, approval_timeout_seconds, format_approval_deadline_line)
+    EA_HEADER_TEXT, EA_REASON_LABEL_TEXT, EA_JUSTIFICATION_LABEL_TEXT, approval_timeout_seconds,
+    format_approval_deadline_line)
 from gateway.platforms.event import MessageEvent, MessageType, ProcessingOutcome
 from gateway.warning_notifications import diagnostic_wake_muted
 from gateway.session import SessionSource, build_session_key
@@ -1629,6 +1630,8 @@ class ExecApprovalPrompt:
     description: str
     smart_denied: bool
     metadata: Optional[Dict[str, Any]] = None
+    # Model-supplied reason for this call (issue #6959); "" when the model sent none.
+    justification: str = ""
 
     @property
     def choices(self) -> List[str]:
@@ -2723,6 +2726,8 @@ class BasePlatformAdapter(ABC):
     _EA_CODE_OPEN: str = "```\n"
     _EA_CODE_CLOSE: str = "\n```\n"
     _EA_REASON_LABEL: str = f"{EA_REASON_LABEL_TEXT}: "
+    # Model-supplied reason for this call (#6959): its own labeled block, above the smart-deny line.
+    _EA_JUSTIFICATION_LABEL: str = f"\n\n\U0001f4a1 {EA_JUSTIFICATION_LABEL_TEXT}:\n"
     _EA_DEADLINE_PREFIX: str = "\n\n"  # separates the deadline line from the reason line
     _EA_SMART_DENY_LINE: str = "\n\nSmart DENY: owner override applies to this one operation only."
     _EA_CMD_BUDGET: int = 3000
@@ -2757,7 +2762,8 @@ class BasePlatformAdapter(ABC):
                 hi = mid - 1
         return text[:lo] + suffix
 
-    def _exec_approval_cmd_budget(self, description: str, smart_denied: bool) -> int:
+    def _exec_approval_cmd_budget(self, description: str, smart_denied: bool,
+                                  justification: str = "") -> int:
         """Chars of command preview that fit; platforms with a hard message cap compute it."""
         return self._EA_CMD_BUDGET
 
@@ -2766,18 +2772,21 @@ class BasePlatformAdapter(ABC):
         return self._EA_DEADLINE_PREFIX + self._ea_escape(format_approval_deadline_line(approval_timeout_seconds()))
 
     def _format_exec_approval(
-        self, command: str, description: str = "dangerous command", smart_denied: bool = False) -> str:
+        self, command: str, description: str = "dangerous command", smart_denied: bool = False,
+        justification: str = "") -> str:
         """Shared exec-approval prompt text: header + fenced (truncated) command + why it was
-        flagged + the deadline line, plus the smart-deny line. Buttons/trailing instructions stay
-        platform-local."""
+        flagged + the model's own justification (when given) + the deadline line, plus the
+        smart-deny line. Buttons/trailing instructions stay platform-local."""
         if self._EA_REASON_BUDGET:
             description = self._ea_fit(str(description or ""), self._EA_REASON_BUDGET)
         cmd_preview = self._ea_fit(
-            str(command or ""), self._exec_approval_cmd_budget(description, smart_denied))
+            str(command or ""), self._exec_approval_cmd_budget(description, smart_denied, justification))
         text = (f"{self._EA_HEADER}"
                 f"{self._EA_CODE_OPEN}{self._ea_escape(cmd_preview)}{self._EA_CODE_CLOSE}"
-                f"{self._EA_REASON_LABEL}{self._ea_escape(description)}"
-                f"{self._ea_deadline_line()}")
+                f"{self._EA_REASON_LABEL}{self._ea_escape(description)}")
+        if justification:
+            text += self._EA_JUSTIFICATION_LABEL + self._ea_escape(justification)
+        text += self._ea_deadline_line()
         return text + self._EA_SMART_DENY_LINE if smart_denied else text
 
     # ── Exec-approval prompt (template method). The choice set is one rule for every button
@@ -2808,17 +2817,19 @@ class BasePlatformAdapter(ABC):
     async def send_exec_approval(
         self, chat_id: str, command: str, session_key: str, description: str = "dangerous command",
         metadata: Optional[Dict[str, Any]] = None, allow_permanent: bool = True, allow_session: bool = True,
-        smart_denied: bool = False,
+        smart_denied: bool = False, justification: Optional[str] = None,
     ) -> SendResult:
         """Interactive exec-approval prompt; a press resolves via
         ``tools.approval.resolve_gateway_approval``. Text and choice set are shared; adapters
-        render them natively in ``_send_exec_approval_prompt``."""
+        render them natively in ``_send_exec_approval_prompt``. ``justification`` is the model's
+        one-line reason for the call (#6959) and is rendered when present."""
         prompt = ExecApprovalPrompt(
             chat_id=chat_id, session_key=session_key, metadata=metadata, command=str(command or ""),
             description=description, smart_denied=smart_denied,
-            text=self._format_exec_approval(command, description, smart_denied),
+            text=self._format_exec_approval(command, description, smart_denied, justification or ""),
             actions=self._exec_approval_actions(
-                allow_permanent=allow_permanent, allow_session=allow_session, smart_denied=smart_denied))
+                allow_permanent=allow_permanent, allow_session=allow_session, smart_denied=smart_denied),
+            justification=justification or "")
         return await self._send_exec_approval_prompt(prompt)
 
     async def _send_exec_approval_prompt(self, prompt: "ExecApprovalPrompt") -> SendResult:

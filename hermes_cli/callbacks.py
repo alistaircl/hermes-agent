@@ -3,6 +3,8 @@
 import queue
 import time as _time
 
+from typing import Optional
+
 from hermes_cli.banner import cprint, _DIM, _RST
 from hermes_cli.config import save_env_value_secure
 from hermes_cli.secret_prompt import masked_secret_prompt
@@ -101,7 +103,7 @@ def prompt_for_secret(cli, var_name: str, prompt: str, metadata=None) -> dict:
 # Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
 # The whole block is removed by reverting the commit that added it.
 
-def approval_callback(cli, command: str, description: str) -> str:
+def approval_callback(cli, command: str, description: str, justification: Optional[str] = None) -> str:
     """Prompt for dangerous command approval through the TUI.
 
     Shows a selection UI with choices: once / session / always / deny.
@@ -128,6 +130,7 @@ def approval_callback(cli, command: str, description: str) -> str:
         cli._approval_state = {
             "command": command,
             "description": description,
+            "justification": justification,
             "choices": choices,
             "selected": 0,
             "response_queue": response_queue,

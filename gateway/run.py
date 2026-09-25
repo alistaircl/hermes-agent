@@ -587,12 +587,14 @@ def _redact_approval_command(cmd: "str | None") -> str:
 
 def _format_exec_approval_fallback(
     command: str, description: str, command_prefix: str, *, allow_permanent: bool = True,
-    allow_session: bool = True, smart_denied: bool = False) -> str:
+    allow_session: bool = True, smart_denied: bool = False, justification: str | None = None) -> str:
     """Render the text fallback from approval capabilities, not platform names. Same words as
     the button card (``BasePlatformAdapter._format_exec_approval``), plus the typed ``/approve``
-    steps a surface without buttons needs."""
+    steps a surface without buttons needs. ``justification`` is the model's one-line reason for
+    the call (#6959); rendered only when present."""
     from gateway.platforms.base_exec_approval import (
-        EA_HEADER_TEXT, EA_REASON_LABEL_TEXT, approval_timeout_seconds, format_approval_deadline_line)
+        EA_HEADER_TEXT, EA_REASON_LABEL_TEXT, EA_JUSTIFICATION_LABEL_TEXT, approval_timeout_seconds,
+        format_approval_deadline_line)
     cmd_preview = command[:200] + "..." if len(command) > 200 else command
     heading = ("⚠️ **Smart DENY — owner override for one operation:**" if smart_denied
                else f"⚠️ **{EA_HEADER_TEXT}**")
@@ -605,6 +607,7 @@ def _format_exec_approval_fallback(
     choices.append(f"`{command_prefix}deny` to cancel")
     return (
         f"{heading}\n```\n{cmd_preview}\n```\n{EA_REASON_LABEL_TEXT}: {description}\n\n"
+        + (f"\U0001f4a1 {EA_JUSTIFICATION_LABEL_TEXT}: {justification}\n\n" if justification else "")
         + ", ".join(choices[:-1]) + f", or {choices[-1]}.\n"
         + format_approval_deadline_line(approval_timeout_seconds()))
 

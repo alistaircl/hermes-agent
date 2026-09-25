@@ -245,6 +245,14 @@ class CLITuiMixin:
                 panel.blank()
             for wrapped in desc_wrapped:
                 panel.row('class:approval-desc', wrapped)
+        # Model-supplied justification (issue #6959) - render after description
+        justification = state.get("justification")
+        if justification:
+            if not use_compact_chrome:
+                panel.blank()
+            just_wrapped = wrap(f"Agent justification: {justification}", inner_text_width)
+            for wrapped in just_wrapped:
+                panel.row('class:approval-just', wrapped)
         return panel.close()
 
     def _get_tui_prompt_symbols(self) -> tuple[str, str]:

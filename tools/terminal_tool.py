@@ -145,11 +145,17 @@ def _docker_has_host_access(config: Dict[str, Any]) -> bool:
 
 
 def _check_all_guards(command: str, env_type: str,
-                      has_host_access: bool = False) -> dict:
-    """Delegate to consolidated guard (tirith + dangerous cmd) with CLI callback."""
+                      has_host_access: bool = False,
+                      justification: Optional[str] = None) -> dict:
+    """Delegate to consolidated guard (tirith + dangerous cmd) with CLI callback.
+
+    ``justification`` is the model-supplied reason for this call (issue #6959); it is
+    forwarded to the approval gate so the human prompt shows intent alongside the command.
+    """
     return _check_all_guards_impl(command, env_type,
                                   approval_callback=_get_approval_callback(),
-                                  has_host_access=has_host_access)
+                                  has_host_access=has_host_access,
+                                  justification=justification)
 
 
 from tools.environments.base import EnvironmentConnectionError
@@ -906,13 +912,15 @@ class _ApprovalVerdict:
     approved_run: bool = False
 
 
-def _run_approval_guards(command: str, env_type: str, config: Dict[str, Any], *, force: bool) -> _ApprovalVerdict:
+def _run_approval_guards(command: str, env_type: str, config: Dict[str, Any], *, force: bool,
+                         justification: Optional[str] = None) -> _ApprovalVerdict:
     """Run tirith + dangerous-command guards; ``force`` skips them entirely.
     Raises :class:`_Rejected` when the command may not run (denied, or pending
-    gateway approval)."""
+    gateway approval). ``justification`` rides along to the human prompt (#6959)."""
     if force:
         return _ApprovalVerdict(approved_run=True)
-    approval = _check_all_guards(command, env_type, has_host_access=_docker_has_host_access(config))
+    approval = _check_all_guards(command, env_type, has_host_access=_docker_has_host_access(config),
+                                 justification=justification)
     if not approval["approved"]:
         if approval.get("status") == "pending_approval":  # gateway ask mode
             raise _Rejected(_error_json(
@@ -1260,12 +1268,16 @@ def terminal_tool(
     _host_local: bool = False,
     _completion_output_chars: int = 0,
     heartbeat: int = 0,
+    justification: Optional[str] = None,
 ) -> str:
     """Execute *command* in the configured terminal environment; returns a JSON string.
 
     ``force`` (internal, not in the model schema) skips the dangerous-command
     check after the user confirmed. ``workdir`` is per-command and never
     recorded as the session cwd. ``pty`` applies to the local backend only.
+    ``justification`` is the model-supplied one-line reason for this call (issue #6959);
+    it is carried through to the approval gate so the human prompt can show why the
+    command is being run, not just what it is.
     ``notify_on_complete`` and ``watch_patterns`` are mutually exclusive
     background-only flags: on conflict watch_patterns is dropped. watch_patterns
     is hard rate-limited (1 notification / 15s / process) and auto-disabled
@@ -1325,7 +1337,8 @@ def terminal_tool(
             ))
         # Pre-exec security checks (tirith + dangerous command detection);
         # force=True means the user already confirmed.
-        verdict = _run_approval_guards(command, env_type, plan.config, force=force)
+        verdict = _run_approval_guards(command, env_type, plan.config, force=force,
+                                       justification=justification)
 
         pty_disabled = pty and _command_requires_pipe_stdin(command)
         if plan.promoted_from_foreground_timeout is not None:
@@ -1413,6 +1426,10 @@ TERMINAL_SCHEMA = {
                 "type": "integer",
                 "minimum": 60,
                 "description": "With background=true: also notify every N seconds (min 60) with the output since the last notice. For long jobs you must react to mid-run (merge trains, full suites); implies notify=true."
+            },
+            "justification": {
+                "type": "string",
+                "description": "One-sentence explanation of why this specific command is needed right now, shown verbatim in the user's approval prompt. Keep it short, concrete, and user-facing (what it does + why). Omit only for trivially safe read-only calls."
             }
             # Legacy aliases (unadvertised, still accepted): notify_on_complete
             # (bool) and watch_patterns (list). notify=true|[...] maps onto
@@ -1483,6 +1500,7 @@ def _handle_terminal(args, **kw):
         notify_on_complete=notify_on_complete,
         watch_patterns=watch_patterns,
         heartbeat=heartbeat,
+        justification=args.get("justification"),
     )
 
 

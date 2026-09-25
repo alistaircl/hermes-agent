@@ -5509,11 +5509,13 @@ class DiscordAdapter(DiscordMediaMixin, BasePlatformAdapter):
     # the command preview to zero and push the content past the cap.
     _EA_REASON_BUDGET = 300
 
-    def _exec_approval_cmd_budget(self, description: str, smart_denied: bool) -> int:
+    def _exec_approval_cmd_budget(self, description: str, smart_denied: bool,
+                                  justification: str = "") -> int:
         # Mentions ride in front of the content and count against the 2000-char message cap too.
         fixed = (len(self._EA_HEADER) + len(self._EA_CODE_OPEN) + len(self._EA_CODE_CLOSE)
                  + len(self._EA_REASON_LABEL) + len(description) + len("...") + len(self._ea_deadline_line())
                  + (len(self._EA_SMART_DENY_LINE) if smart_denied else 0)
+                 + (len(self._EA_JUSTIFICATION_LABEL) + len(justification) if justification else 0)
                  + len(self._approval_mention_content() or "") + 1)
         return max(0, self.MAX_MESSAGE_LENGTH - fixed)
 

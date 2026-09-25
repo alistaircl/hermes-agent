@@ -14,6 +14,8 @@ from __future__ import annotations
 # Bare strings; adapters add their own bold/HTML around them.
 EA_HEADER_TEXT = "Hermes wants to run a command that needs your OK"
 EA_REASON_LABEL_TEXT = "Why it was flagged"
+# Model-supplied rationale for this specific call (issue #6959); rendered only when present.
+EA_JUSTIFICATION_LABEL_TEXT = "Agent justification"
 
 # Timeout notice posted when nobody answered the prompt (``{window}`` = "5 minutes").
 APPROVAL_TIMED_OUT_NOTICE = (

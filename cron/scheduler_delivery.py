@@ -25,6 +25,29 @@ from typing import Any, List, Optional
 logger = logging.getLogger("cron.scheduler")
 
 
+def _format_cron_header(job: dict, run_delivery=None) -> str:
+    """Format the metadata header for cron job reports (issue #6959).
+    Returns a string ending with newline if non-empty, else empty string.
+    """
+    from datetime import datetime as _dt
+    from hermes_time import now as _hermes_now_fn, safe_strftime as _safe_strftime
+    _meta_lines = []
+    if run_delivery is not None:
+        if run_delivery._job_start_time:
+            _rt_dt = _dt.fromtimestamp(run_delivery._job_start_time, _hermes_now_fn().tzinfo)
+            _meta_lines.append(f"Run Time: {_safe_strftime(_rt_dt, '%Y-%m-%d %H:%M:%S')}")
+        _meta_lines.append(f"Schedule: {job.get('schedule_display', job.get('schedule', {}).get('display', 'unknown'))}")
+        _mi = run_delivery.model_info or {}
+        if _mi.get('model', 'unknown') != 'unknown':
+            _meta_lines.append(f"Model: {_mi.get('provider', '?')}/{_mi.get('model', '?')}")
+        if run_delivery._elapsed_seconds:
+            _m, _s = divmod(int(run_delivery._elapsed_seconds), 60)
+            _meta_lines.append(f"Duration: {_m}m{_s}s" if _m else f"Duration: {_s}s")
+    else:
+        _meta_lines.append(f"Schedule: {job.get('schedule_display', job.get('schedule', {}).get('display', 'unknown'))}")
+    return "\n".join(_meta_lines) + "\n" if _meta_lines else ""
+
+
 # Validates user-supplied delivery platform names, preventing env-var enumeration via crafted names.
 _KNOWN_DELIVERY_PLATFORMS = frozenset({
     "telegram", "discord", "slack", "whatsapp", "signal",
@@ -1904,12 +1927,15 @@ def _unresolved_delivery_outcome(job: dict, for_failure: bool) -> Optional[str]:
 
 
 def _deliver_result(
-    job: dict, content: str, adapters=None, loop=None, *, for_failure: bool = False
+    job: dict, content: str, adapters=None, loop=None, *, for_failure: bool = False,
+    run_delivery=None,
 ) -> Optional[str]:
     """Deliver job output to the configured target(s). With ``adapters``/``loop`` (gateway
     running) the live adapter is tried first (E2EE rooms can't use the standalone HTTP path), then
     standalone fallback. ``for_failure=True`` routes failure-category notices through the job's
-    ``failure_deliver`` override when present (NS-788). Returns None on success, else an error."""
+    ``failure_deliver`` override when present (NS-788). Returns None on success, else an error.
+    ``run_delivery`` (optional): the ``_RunDelivery`` from ``_run_one_job_body``, carrying
+    timing/model metadata for the header block (#6959)."""
     job.pop("_bot_chat_delivery_receipts", None)
     job.pop("_notification_all_targets_suppressed", None)
     targets = _resolve_delivery_targets(job, for_failure=for_failure)
@@ -1953,15 +1979,18 @@ def _deliver_result(
     # persisted as ``last_delivery_unverified`` so `hermes cron list` shows it.
     unverified_targets: list = []
     if wrap_response:
-        task_name = job.get("name", job["id"])
-        delivery_content = (
-            f"Cronjob Response: {task_name}\n"
-            f"(job_id: {job.get('id', '')})\n"
-            f"-------------\n\n"
-            f"{content}\n\n"
-            "To stop or manage this job, send me a new message "
-            f"(e.g. \"stop reminder {task_name}\")."
-        )
+            task_name = job.get("name", job["id"])
+            # Cron report metadata header (issue #6959)
+            _meta_block = _format_cron_header(job, run_delivery)
+            delivery_content = (
+                f"Cronjob Response: {task_name}\n"
+                f"(job_id: {job.get('id', '')})\n"
+                f"{_meta_block}"
+                f"-------------\n\n"
+                f"{content}\n\n"
+                "To stop or manage this job, send me a new message "
+                f"(e.g. \"stop reminder {task_name}\")."
+            )
     else:
         delivery_content = content
 

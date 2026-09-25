@@ -533,7 +533,7 @@ _STYLE_TEMPLATES = {
     "sudo-prompt": "{error} bold", "sudo-border": "{input_rule}", "sudo-title": "{error} bold",
     "sudo-text": "{text}",
     "approval-border": "{input_rule}", "approval-title": "{warn} bold", "approval-desc": "{text} bold",
-    "approval-cmd": "{dim} italic", "approval-choice": "{dim}", "approval-selected": "{title} bold",
+    "approval-just": "{dim} italic", "approval-cmd": "{dim} italic", "approval-choice": "{dim}", "approval-selected": "{title} bold",
     "voice-status": "bg:{voice_bg} {label}", "voice-status-recording": "bg:{voice_bg} {error} bold"}
 
 

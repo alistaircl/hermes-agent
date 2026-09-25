@@ -2927,6 +2927,10 @@ class _RunDelivery:
     job: dict
     success: bool
     error: Optional[str]
+    # Cron report metadata fields (issue #6959)
+    _job_start_time: Optional[float] = None
+    _elapsed_seconds: Optional[float] = None
+    model_info: Optional[Dict[str, str]] = None
     delivery_attempted: bool = False
     delivery_error: Optional[str] = None
     should_deliver: bool = False
@@ -3015,6 +3019,7 @@ def _save_compose_deliver(
                 # Failure summaries (and drift/blocked-config alerts composed into deliver_content
                 # on the failure path) honor the job's failure_deliver override (NS-788).
                 for_failure=not d.success,
+                run_delivery=d,
             )
     except Exception as de:
         if isinstance(de, _FireClaimLostDuringSideEffect):
@@ -3225,6 +3230,12 @@ def _run_one_job_body(
             "execution_id": execution_id}
         if fence.cancel_event is not None:
             _run_kwargs["cancel_event"] = fence.cancel_event
+        # --- Cron report metadata (issue #6959) ---
+        _job_start_time = time.time()
+        _model_info = {
+            "provider": job.get("provider") or job.get("provider_snapshot") or "default",
+            "model": job.get("model") or job.get("model_snapshot") or "default",
+        }
         try:
             success, output, final_response, error = run_job(job, **_run_kwargs)
         except BaseException:
@@ -3250,6 +3261,9 @@ def _run_one_job_body(
         # Agent is still live through delivery; wrap ALL of save/compose/deliver in try/finally so a
         # raise anywhere still tears the deferred agent down.
         d = _RunDelivery(job=job, success=success, error=error, agent_declared=agent_declared)
+        d._job_start_time = _job_start_time
+        d._elapsed_seconds = time.time() - _job_start_time
+        d.model_info = _model_info
         try:
             _save_compose_deliver(
                 d, fence, final_response, output, adapters=adapters, loop=loop, verbose=verbose,

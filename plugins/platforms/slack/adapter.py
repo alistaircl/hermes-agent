@@ -4826,11 +4826,13 @@ class SlackAdapter(BasePlatformAdapter):
     _EA_ACTION_IDS = {"once": "hermes_approve_once", "session": "hermes_approve_session",
                       "always": "hermes_approve_always", "deny": "hermes_deny"}
 
-    def _exec_approval_cmd_budget(self, description: str, smart_denied: bool) -> int:
+    def _exec_approval_cmd_budget(self, description: str, smart_denied: bool,
+                                  justification: str = "") -> int:
         # execute_code approvals embed the whole script, so budget the preview against the cap.
         fixed = (len(self._EA_HEADER) + len(self._EA_CODE_OPEN) + len(self._EA_CODE_CLOSE)
                  + len(self._EA_REASON_LABEL) + len(description) + len("...") + len(self._ea_deadline_line())
-                 + (len(self._EA_SMART_DENY_LINE) if smart_denied else 0))
+                 + (len(self._EA_SMART_DENY_LINE) if smart_denied else 0)
+                 + (len(self._EA_JUSTIFICATION_LABEL) + len(justification) if justification else 0))
         return max(0, self._EA_SECTION_CAP - fixed)
 
     async def _send_exec_approval_prompt(self, prompt: ExecApprovalPrompt) -> SendResult:
