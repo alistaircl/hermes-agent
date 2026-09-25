@@ -20,7 +20,7 @@ logger = logging.getLogger("tools.approval")
 def prompt_dangerous_approval(command: str, description: str, timeout_seconds: int | None = None,
                               allow_permanent: bool = True, approval_callback=None,
                               *, allow_session: bool = True, smart_denied: bool = False,
-                              title: str | None = None) -> str:
+                              title: str | None = None, justification: str | None = None) -> str:
     """Prompt the user to approve a dangerous command (CLI only).
 
     allow_permanent=False hides [a]lways (tirith warnings present: broad permanent
@@ -31,6 +31,8 @@ def prompt_dangerous_approval(command: str, description: str, timeout_seconds: i
     smart_denied: owner override of a Smart DENY, offer only once/deny.
     title: header for the plain-input prompt when the question is not a dangerous command
     ("Save to memory?", "<server> is asking"); the default header stays the dangerous-command one.
+    justification: model-supplied reason for this call (issue #6959); when present it is
+    shown as an "Agent justification:" row so the human sees intent, not just the command.
     approval_callback: CLI prompt_toolkit callback ``(command, description, *,
     allow_permanent=True, allow_session=True, smart_denied=False) -> str``; legacy
     signatures keep working while both keywords hold their defaults.
@@ -50,7 +52,8 @@ def prompt_dangerous_approval(command: str, description: str, timeout_seconds: i
     # See #79719.
     with human_wait_window():
         return _ask_human(command, description, timeout_seconds, allow_permanent,
-                          approval_callback, allow_session, smart_denied, title=title)
+                          approval_callback, allow_session, smart_denied, title=title,
+                          justification=justification)
 
 
 class Unanswered(str):
@@ -107,12 +110,16 @@ def callback_accepts(callback, keyword: str) -> bool:
 
 
 def _ask_human(command: str, description: str, timeout_seconds: int, allow_permanent: bool,
-               approval_callback, allow_session: bool, smart_denied: bool, title: str | None = None) -> str:
+               approval_callback, allow_session: bool, smart_denied: bool, title: str | None = None,
+               justification: str | None = None) -> str:
     # Redact before any user-visible rendering; the original `command` still executes after approval. Same redactor as
     # memory/log sanitization so tokens mask consistently across surfaces.
     from agent.redact import redact_sensitive_text
     display_command = redact_sensitive_text(command)
     display_description = redact_sensitive_text(description)
+    # Model-supplied reason (issue #6959): redacted like the command — a model can echo a
+    # secret from earlier context into its own explanation.
+    display_justification = redact_sensitive_text(justification) if justification else ""
     # Smart DENY and a session-less gate both reduce the menu to once/deny.
     once_only = smart_denied or not allow_session
 
@@ -120,9 +127,11 @@ def _ask_human(command: str, description: str, timeout_seconds: int, allow_perma
         try:
             # Non-default scopes only: legacy callbacks lack the newer keywords.
             callback_kwargs = {"allow_permanent": allow_permanent,
-                               **({"allow_session": False} if not allow_session else {}),
-                               **({"smart_denied": True} if smart_denied else {}),
-                               **({"title": title} if title and callback_accepts(approval_callback, "title") else {})}
+                               **( {"allow_session": False} if not allow_session else {}),
+                               **( {"smart_denied": True} if smart_denied else {}),
+                               **( {"title": title} if title and callback_accepts(approval_callback, "title") else {}),
+                               **( {"justification": display_justification}
+                                   if display_justification and callback_accepts(approval_callback, "justification") else {})}
             return approval_callback(display_command, display_description, **callback_kwargs)
         except Exception as e:
             logger.error("Approval callback failed: %s", e, exc_info=True)
@@ -155,8 +164,9 @@ def _ask_human(command: str, description: str, timeout_seconds: int, allow_perma
         shape = "smart_deny" if once_only else "long" if allow_permanent else "short"
         prompt_key, menu_key = f"approval.prompt_{shape}", f"approval.choose_{shape}"
         header = title or t('approval.dangerous_header', description=display_description)
+        just_line = f"\n      Agent justification: {display_justification}" if display_justification else ""
         print(f"\n  {header}"
-              f"\n      {display_command}\n\n{t(menu_key)}\n")
+              f"\n      {display_command}{just_line}\n\n{t(menu_key)}\n")
         sys.stdout.flush()
         choice = _read_choice(t(prompt_key), timeout_seconds)
         if choice is None:
@@ -197,7 +207,8 @@ def _attempt(name: str, choice, failure, fallback) -> dict:
 
 def _present_with_selected_transport(*, command: str, description: str, pattern_key: str,
                                      pattern_keys: list[str], session_key: str, surface: str,
-                                     allow_session: bool, allow_permanent: bool) -> dict:
+                                     allow_session: bool, allow_permanent: bool,
+                                     justification: str = "") -> dict:
     """Present through an explicitly selected plugin transport, if any. A selected
     transport replaces every built-in prompt surface; detection, allowed scopes,
     persistence, timeout, and final authorization stay host-owned. A failed
@@ -227,6 +238,7 @@ def _present_with_selected_transport(*, command: str, description: str, pattern_
             description=redact_sensitive_text(description, force=True), pattern_key=pattern_key,
             pattern_keys=tuple(pattern_keys), session_key=session_key, surface=surface, allow_session=allow_session,
             allow_permanent=allow_permanent, timeout_seconds=timeout_seconds,
+            justification=redact_sensitive_text(justification, force=True) if justification else "",
         )
     except Exception:
         # Never fall back to raw text if redaction or request construction fails:
