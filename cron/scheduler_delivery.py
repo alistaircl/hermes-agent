@@ -26,6 +26,26 @@ from typing import Any, List, Optional
 logger = logging.getLogger("cron.scheduler")
 
 
+def _safe_schedule_label(job: dict) -> str:
+    """Render a cron schedule so markdown post-processing cannot eat it.
+
+    A bare cron expression contains runs of `*`, which are Markdown emphasis
+    markers. Telegram's plain-text fallback (`_strip_mdv2` in the platform
+    adapters) strips them UNCONDITIONALLY -- it does not respect code spans or
+    fenced blocks. Verified: both `` `0 8 * * *` `` and ``` ```0 8 * * *``` ```
+    come out as `0 8   *`, so fencing the value is not a fix.
+
+    So do not emit raw asterisks at all: substitute `·` (U+00B7), which carries
+    no emphasis semantics and passes through untouched. "0 8 * * *" renders as
+    "0 8 · · ·" -- unambiguous, and immune to whatever a platform's markdown
+    pass does next.
+    """
+    sched = job.get('schedule_display') or (job.get('schedule') or {}).get('display') or 'unknown'
+    if not any(ch in sched for ch in '*'):
+        return sched  # "every 2h" and friends: no emphasis characters at all
+    return sched.replace('*', '·')
+
+
 def _format_cron_header(job: dict, run_delivery=None) -> str:
     """Format the metadata header for cron job reports (issue #6959).
     Returns a string ending with newline if non-empty, else empty string.
@@ -37,7 +57,7 @@ def _format_cron_header(job: dict, run_delivery=None) -> str:
         if run_delivery._job_start_time:
             _rt_dt = _dt.fromtimestamp(run_delivery._job_start_time, _hermes_now_fn().tzinfo)
             _meta_lines.append(f"Run Time: {_safe_strftime(_rt_dt, '%Y-%m-%d %H:%M:%S')}")
-        _meta_lines.append(f"Schedule: {job.get('schedule_display', job.get('schedule', {}).get('display', 'unknown'))}")
+        _meta_lines.append(f"Schedule: {_safe_schedule_label(job)}")
         _mi = run_delivery.model_info or {}
         if _mi.get('model', 'unknown') != 'unknown':
             _meta_lines.append(f"Model: {_mi.get('provider', '?')}/{_mi.get('model', '?')}")
@@ -45,7 +65,7 @@ def _format_cron_header(job: dict, run_delivery=None) -> str:
             _m, _s = divmod(int(run_delivery._elapsed_seconds), 60)
             _meta_lines.append(f"Duration: {_m}m{_s}s" if _m else f"Duration: {_s}s")
     else:
-        _meta_lines.append(f"Schedule: {job.get('schedule_display', job.get('schedule', {}).get('display', 'unknown'))}")
+        _meta_lines.append(f"Schedule: {_safe_schedule_label(job)}")
     return "\n".join(_meta_lines) + "\n" if _meta_lines else ""
 
 
