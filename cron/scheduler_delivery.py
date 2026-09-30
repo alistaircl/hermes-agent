@@ -25,6 +25,57 @@ from typing import Any, List, Optional
 logger = logging.getLogger("cron.scheduler")
 
 
+_DAY_NAMES = ("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+
+
+def _cron_in_words(sched: str) -> str:
+    """Render a 5-field cron expression as plain English.
+
+    `0 6 * * *` -> "every day at 06:00". Asterisks cannot be shown literally
+    (Telegram's _strip_mdv2 eats them as emphasis), so an unexplained middot
+    substitution is worse than useless -- it reads as noise. Speak the schedule
+    instead. Returns '' if the expression is not understood.
+    """
+    parts = sched.split()
+    if len(parts) != 5:
+        return ""
+    minute, hour, dom, month, dow = parts
+    if dom != "*" or month != "*":
+        return ""
+    if minute not in ("*", "0", "00") and not minute.isdigit():
+        return ""  # step values like */15: understood enough to label, see below
+    # "*/6" -> every 6 hours; "30 8" -> a fixed minute past a named hour.
+    if hour.startswith("*/"):
+        step = hour[2:]
+        if not step.isdigit() or int(step) <= 0:
+            return ""
+        m = f":{minute.zfill(2)}" if minute.isdigit() and int(minute) else ""
+        return f"every {step} hours{m} past the hour"
+    if not (hour.isdigit() or "," in hour):
+        return ""
+    hh = int(hour) if hour.isdigit() else 0
+    ampm = "AM" if hh < 12 else "PM"
+    h12 = hh % 12 or 12
+    at = f"at {h12}:{minute.zfill(2)} {ampm}" if minute.isdigit() else "every minute"
+    # "0" = midnight, "12" = noon: at those hours the AM/PM suffix is redundant.
+    if hh == 0:
+        at = "at midnight"
+    elif hh == 12:
+        at = "at noon"
+    if dow == "*":
+        if hour == "*":
+            return "every minute"
+        if "," in hour:
+            hours = [f"{int(h) % 12 or 12} {'AM' if int(h) < 12 else 'PM'}" for h in hour.split(",")]
+            last = hours[-1]
+            rest = ", ".join(hours[:-1])
+            return f"every day at {rest} and {last}"
+        return f"every day {at}"
+    if dow.isdigit() and 0 <= int(dow) <= 6:
+        return f"every {_DAY_NAMES[int(dow)]} {at}"
+    return ""
+
+
 def _safe_schedule_label(job: dict) -> str:
     """Render a cron schedule so markdown post-processing cannot eat it.
 
@@ -34,14 +85,16 @@ def _safe_schedule_label(job: dict) -> str:
     fenced blocks. Verified: both `` `0 8 * * *` `` and ``` ```0 8 * * *``` ```
     come out as `0 8   *`, so fencing the value is not a fix.
 
-    So do not emit raw asterisks at all: substitute `·` (U+00B7), which carries
-    no emphasis semantics and passes through untouched. "0 8 * * *" renders as
-    "0 8 · · ·" -- unambiguous, and immune to whatever a platform's markdown
-    pass does next.
+    Prefer English ("every day at 6:00 AM"), which needs no escaping at all.
+    Only when the expression is not understood do we fall back to `*` -> `·`,
+    which at least preserves the field structure.
     """
     sched = job.get('schedule_display') or (job.get('schedule') or {}).get('display') or 'unknown'
     if not any(ch in sched for ch in '*'):
-        return sched  # "every 2h" and friends: no emphasis characters at all
+        return sched  # "every 2h", "30m": already human, no emphasis chars
+    words = _cron_in_words(sched)
+    if words:
+        return f"{sched} ({words})"
     return sched.replace('*', '·')
 
 
@@ -82,19 +135,28 @@ def _format_cron_header(job: dict, run_delivery=None) -> str:
     if run_delivery is None:
         run_delivery = _meta_from_job(job)
     _meta_lines = []
-    if run_delivery is not None:
-        if run_delivery._job_start_time:
-            _rt_dt = _dt.fromtimestamp(run_delivery._job_start_time, _hermes_now_fn().tzinfo)
-            _meta_lines.append(f"Run Time: {_safe_strftime(_rt_dt, '%Y-%m-%d %H:%M:%S %Z')}")
-        _meta_lines.append(f"Schedule: {_safe_schedule_label(job)}")
-        _mi = run_delivery.model_info or {}
-        if _mi.get('model', 'unknown') != 'unknown':
-            _meta_lines.append(f"Model: {_mi.get('provider', '?')}/{_mi.get('model', '?')}")
-        if run_delivery._elapsed_seconds:
-            _m, _s = divmod(int(run_delivery._elapsed_seconds), 60)
-            _meta_lines.append(f"Duration: {_m}m{_s}s" if _m else f"Duration: {_s}s")
-    else:
-        _meta_lines.append(f"Schedule: {_safe_schedule_label(job)}")
+    # Start time is the one field every report should carry, even when the run
+    # produced no run_delivery at all (the failure path never builds one). Fall
+    # back to the job's own last_run_at so the header always says WHEN this ran.
+    _start = getattr(run_delivery, "_job_start_time", None)
+    if not _start:
+        _raw = (job.get("last_run_at") or "").strip() if isinstance(job, dict) else ""
+        if _raw:
+            try:
+                _start = _dt.fromisoformat(_raw).timestamp()
+            except Exception:
+                _start = None
+    if _start:
+        _rt_dt = _dt.fromtimestamp(_start, _hermes_now_fn().tzinfo)
+        _meta_lines.append(f"Start Time: {_safe_strftime(_rt_dt, '%Y-%m-%d %H:%M:%S %Z')}")
+    _meta_lines.append(f"Schedule: {_safe_schedule_label(job)}")
+    _mi = getattr(run_delivery, "model_info", None) or {}
+    if _mi.get('model', 'unknown') != 'unknown':
+        _meta_lines.append(f"Model: {_mi.get('provider', '?')}/{_mi.get('model', '?')}")
+    _elapsed = getattr(run_delivery, "_elapsed_seconds", None)
+    if _elapsed:
+        _m, _s = divmod(int(_elapsed), 60)
+        _meta_lines.append(f"Duration: {_m}m{_s}s" if _m else f"Duration: {_s}s")
     return "\n".join(_meta_lines) + "\n" if _meta_lines else ""
 
 
