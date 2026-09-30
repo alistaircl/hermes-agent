@@ -46,17 +46,47 @@ def _safe_schedule_label(job: dict) -> str:
     return sched.replace('*', '·')
 
 
+class _QueuedRunMeta:
+    """Stand-in for _RunDelivery when a report is delivered from the queue.
+
+    A restart-safe worker enqueues the report and exits; the header is built
+    later by drain_delivery_queue(), which has no _RunDelivery. The worker
+    serializes the few fields the header needs into job['_cron_run_meta'], and
+    this adapter exposes them under the same attribute names the formatter
+    already reads.
+    """
+
+    __slots__ = ("_job_start_time", "_elapsed_seconds", "model_info")
+
+    def __init__(self, meta: dict):
+        self._job_start_time = meta.get("job_start_time")
+        self._elapsed_seconds = meta.get("elapsed_seconds")
+        self.model_info = {
+            "model": meta.get("model"),
+            "provider": meta.get("provider"),
+        }
+
+
+def _meta_from_job(job: dict):
+    """Return a _QueuedRunMeta when the job carries serialized run metadata."""
+    meta = job.get("_cron_run_meta") if isinstance(job, dict) else None
+    return _QueuedRunMeta(meta) if isinstance(meta, dict) else None
+
+
 def _format_cron_header(job: dict, run_delivery=None) -> str:
     """Format the metadata header for cron job reports (issue #6959).
     Returns a string ending with newline if non-empty, else empty string.
     """
     from datetime import datetime as _dt
     from hermes_time import now as _hermes_now_fn, safe_strftime as _safe_strftime
+    # Queued deliveries carry the metadata on the job instead of in an object.
+    if run_delivery is None:
+        run_delivery = _meta_from_job(job)
     _meta_lines = []
     if run_delivery is not None:
         if run_delivery._job_start_time:
             _rt_dt = _dt.fromtimestamp(run_delivery._job_start_time, _hermes_now_fn().tzinfo)
-            _meta_lines.append(f"Run Time: {_safe_strftime(_rt_dt, '%Y-%m-%d %H:%M:%S')}")
+            _meta_lines.append(f"Run Time: {_safe_strftime(_rt_dt, '%Y-%m-%d %H:%M:%S %Z')}")
         _meta_lines.append(f"Schedule: {_safe_schedule_label(job)}")
         _mi = run_delivery.model_info or {}
         if _mi.get('model', 'unknown') != 'unknown':
@@ -2041,6 +2071,21 @@ def _deliver_result(
             and any(target["platform"] != BOT_CHAT_PLATFORM for target in targets)):
         from cron.delivery_queue import enqueue_and_wait
 
+        # This job runs in a restart-safe worker, so the header is assembled later by
+        # drain_delivery_queue(), which has no access to this in-process _RunDelivery --
+        # the queued row only carries the job dict. Without the metadata below the report
+        # header degrades to a bare "Schedule:" line with no Run Time / Model / Duration
+        # (observed on the Cron Watchdog, 2026-09-30). Serialize the fields into the
+        # queued job so _format_cron_header can rebuild them on the other side.
+        if run_delivery is not None:
+            job = dict(job)  # don't mutate the caller's dict
+            _mi = run_delivery.model_info or {}
+            job["_cron_run_meta"] = {
+                "job_start_time": run_delivery._job_start_time,
+                "elapsed_seconds": run_delivery._elapsed_seconds,
+                "model": _mi.get("model"),
+                "provider": _mi.get("provider"),
+            }
         _record_delivery_verification(job, [])
         error = enqueue_and_wait(external_execution, job, content, for_failure=for_failure)
         from cron.delivery_queue import get_status

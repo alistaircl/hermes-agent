@@ -2656,6 +2656,24 @@ def run_job(
             else:
                 _teardown_cron_agent(agent, job_id)
 
+        # Report the model that ACTUALLY served this run, for the cron report
+        # header. `job["model"]` is only the *requested* model: `_resolve_job_runtime`
+        # may have failed over to a fallback provider (and model) before the agent
+        # was built, and a job with model=None really runs the main agent model.
+        # Recording the resolved values here — where they are known — lets the
+        # caller label the report accurately instead of echoing the job dict.
+        # `setup` is bound only past the preflight gates; the agent itself proves
+        # we got that far, but guard anyway so this can never raise.
+        try:
+            job["_resolved_model"] = str(model)
+            _rt = getattr(locals().get("setup"), "runtime", None)
+            if isinstance(_rt, dict):
+                job["_resolved_provider"] = str(
+                    _rt.get("provider") or _rt.get("billing_provider") or ""
+                )
+        except Exception:  # never let header bookkeeping break a completed run
+            logger.debug("Job '%s': could not record resolved model", job_id, exc_info=True)
+
 
 def _teardown_cron_agent(
     agent, job_id: str, *, timeout_seconds: Optional[float] = None
@@ -3385,10 +3403,12 @@ def _run_one_job_body(
             _run_kwargs["cancel_event"] = fence.cancel_event
         # --- Cron report metadata (issue #6959) ---
         _job_start_time = time.time()
-        _model_info = {
-            "provider": job.get("provider") or job.get("provider_snapshot") or "default",
-            "model": job.get("model") or job.get("model_snapshot") or "default",
-        }
+        # Model/provider come from run_job() below, which records what ACTUALLY ran
+        # (`job["_resolved_*"]`). Reading job["model"] here would only report the
+        # *requested* model — wrong whenever the job has no pin (it follows the main
+        # agent model) or when a fallback provider took over mid-run. Left unset now
+        # and filled in after run_job returns.
+        _model_info: Dict[str, str] = {}
         try:
             success, output, final_response, error = run_job(job, **_run_kwargs)
         except BaseException:
@@ -3401,6 +3421,18 @@ def _run_one_job_body(
             _teardown_deferred()
             _record_fire_ownership_lost(job, fire_owner, execution_id)
             return True
+
+        # run_job recorded what actually served this run. Prefer it; fall back to the
+        # configured pin only if the run never got far enough to resolve anything,
+        # and say "unknown" rather than "default" so the header never overstates.
+        _model_info = {
+            "provider": job.get("_resolved_provider") or job.get("provider") or "unknown",
+            "model": job.get("_resolved_model") or job.get("model") or "unknown",
+        }
+        # These are per-run values on a dict that is re-read from jobs.json next tick;
+        # drop them so a later run cannot report a previous run's model.
+        job.pop("_resolved_model", None)
+        job.pop("_resolved_provider", None)
 
         # An agent can finish its own turn after a delegated child has failed. Let it explicitly
         # declare that semantic failure so the existing failure path updates status, streaks,
