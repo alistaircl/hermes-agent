@@ -86,16 +86,17 @@ def _safe_schedule_label(job: dict) -> str:
     fenced blocks. Verified: both `` `0 8 * * *` `` and ``` ```0 8 * * *``` ```
     come out as `0 8   *`, so fencing the value is not a fix.
 
-    Prefer English ("every day at 6:00 AM"), which needs no escaping at all.
-    Only when the expression is not understood do we fall back to `*` -> `·`,
-    which at least preserves the field structure.
+    Prefer English ("every day at 6:00 AM"), which needs no escaping at all. When the raw
+    expression is shown alongside it, wildcards are substituted with `·`: the English alone
+    does not save us, because a bare "0 6 * * *" beside it still trips the stripper (#111761
+    family -- see the note above).
     """
     sched = job.get('schedule_display') or (job.get('schedule') or {}).get('display') or 'unknown'
     if not any(ch in sched for ch in '*'):
         return sched  # "every 2h", "30m": already human, no emphasis chars
     words = _cron_in_words(sched)
     if words:
-        return f"{sched} ({words})"
+        return f"{sched.replace('*', '·')} ({words})"
     return sched.replace('*', '·')
 
 
