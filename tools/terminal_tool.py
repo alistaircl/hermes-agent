@@ -1563,13 +1563,13 @@ TERMINAL_SCHEMA = {
             },
             "justification": {
                 "type": "string",
-                "description": "One-sentence explanation of why this specific command is needed right now, shown verbatim in the user's approval prompt. Keep it short, concrete, and user-facing (what it does + why). Omit only for trivially safe read-only calls."
+                "description": "One-sentence explanation of why this specific command is needed right now, shown verbatim in the user's approval prompt. Keep it short, concrete, and user-facing (what it does + why). REQUIRED on every call -- the user reviews this before approving and denies prompts that lack it, so an omitted justification means a wasted round-trip."
             }
             # Legacy aliases (unadvertised, still accepted): notify_on_complete
             # (bool) and watch_patterns (list). notify=true|[...] maps onto
             # them in the dispatch wrapper; explicit notify wins on conflict.
         },
-        "required": ["command"]
+        "required": ["command", "justification"]
     }
 }
 
