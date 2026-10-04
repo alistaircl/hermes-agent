@@ -3380,11 +3380,6 @@ _SENTENCE_TERMINALS = (".", "!", "?", "\u3002", "\uff01", "\uff1f")
 _DEGENERATE_LEADING_PUNCT = "?!,;:)]}"
 
 
-def _is_emoji(ch: str) -> bool:
-    """Emoji/pictograph test, so an emoji-only reply ("✅") reads as an answer not a collapse."""
-    return ord(ch) >= 0x2600 and not ch.isalpha()
-
-
 def looks_like_degenerate_final(text: str, user_message: Any = None) -> bool:
     """Whether a text stop reads as a collapsed fragment rather than a (terse) answer.
 
@@ -3392,25 +3387,11 @@ def looks_like_degenerate_final(text: str, user_message: Any = None) -> bool:
     non-ASCII letters, a terse non-Latin reply ("是", "Готово") is an answer, not a collapse.
     """
     t = (text or "").strip()
-    if not t:
-        return False
-    # Content-free output ("!!!!!!", "...", "???", "-") is never an answer, whatever it ends
-    # with. Checked BEFORE the sentence-terminal exemption below: "!" is in that tuple, so
-    # "!!!!!!!!".endswith(_SENTENCE_TERMINALS) is True and a pure-punctuation reply would
-    # otherwise be waved through as a finished sentence. This is what a model emits when its
-    # reasoning was promoted as the visible reply and the reasoning itself was noise.
-    # An emoji-only reply ("✅") stays allowed -- a legitimate terse answer.
-    if not any(ch.isalnum() or _is_emoji(ch) for ch in t):
-        return True
-    if len(t) > _DEGENERATE_FINAL_MAX_CHARS or t.endswith(_SENTENCE_TERMINALS):
+    if not t or len(t) > _DEGENERATE_FINAL_MAX_CHARS or t.endswith(_SENTENCE_TERMINALS):
         return False
     if t[0] in _DEGENERATE_LEADING_PUNCT and len(t) > 1 and t[1].isalpha():
         return True
-    if any(ch.isascii() and ch.isalnum() for ch in t):
-        return False
-    # An emoji-only reply has no ASCII letters and no non-Latin script letters, so without
-    # this it would fall through to the wrong-script check below and read as a collapse.
-    if all(_is_emoji(ch) or ch.isspace() for ch in t):
+    if not any(ch.isalpha() for ch in t) or any(ch.isascii() and ch.isalnum() for ch in t):
         return False
     from agent.codex_responses_adapter import _summarize_user_message_for_log
     user_text = _summarize_user_message_for_log(user_message) if user_message else ""
