@@ -669,6 +669,11 @@ _REASONING_CARRIER_ROUTES: tuple = (
     # Vendors that document reasoning_details replay next to reasoning_content.
     (frozenset({RC, RD}), frozenset({"novita", "tencent-tokenhub", "minimax", "minimax-cn"}),
      ("novita.ai", "tokenhub.tencentmaas.com", "tokenhub-intl.tencentcloudmaas.com", "minimax.io", "minimaxi.com")),
+    # NVIDIA NIM maps ``reasoning`` and ``reasoning_content`` onto one field (serde alias), so a
+    # message carrying both fails with HTTP 400 "duplicate field `reasoning_content`". Matched by
+    # host before the ``custom`` row: a custom provider entry pointing at NIM must not inherit
+    # the local-endpoint {RC, R} pair.
+    (frozenset({RC}), frozenset(), ("integrate.api.nvidia.com",)),
     (_LOCAL_CARRIERS, frozenset({"ollama-cloud", "custom", "lmstudio", "upstage"}), ("ollama.com", "upstage.ai")),
 )
 
