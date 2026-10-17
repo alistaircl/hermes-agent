@@ -3154,6 +3154,16 @@ def _save_compose_deliver(
                 _delivery_lane_value(job, for_failure=not d.success)) == "local":
             return
         queued_job = dict(job)
+        # The queue row IS the send, and the drained header rebuilds only what the row
+        # carries: without the run metadata every report delivered through this queue
+        # degrades to Start Time + Schedule with no Model / Duration. Same contract the
+        # restart-safe-worker branch in _deliver_result already serializes.
+        queued_job["_cron_run_meta"] = {
+            "job_start_time": d._job_start_time,
+            "elapsed_seconds": d._elapsed_seconds,
+            "model": (d.model_info or {}).get("model"),
+            "provider": (d.model_info or {}).get("provider"),
+        }
         if d.failure_incident_id:
             queued_job["_failure_incident_id"] = d.failure_incident_id
         # The queue row IS the send: publish it under the same fence as a direct send, so a claim
